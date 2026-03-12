@@ -2951,8 +2951,10 @@ async function fetchShopifyFromGmail() {
     // Call Google Apps Script which has Gmail access server-side
     const response = await fetch(`${SYNC_URL}?key=${encodeURIComponent(SYNC_KEY)}&action=getOrders`, {method:'GET'});
     if (!response.ok) { showToast('❌ Server error ' + response.status + '. Check Apps Script deployment.', 'error'); return; }
-    const rawOrders = await response.json();
-    if (!Array.isArray(rawOrders)) { showToast('❌ Unexpected response from Apps Script', 'error'); return; }
+    const json = await response.json();
+    // Accept both plain array (old script) and {ok:true, orders:[]} (new script)
+    const rawOrders = Array.isArray(json) ? json : (json && Array.isArray(json.orders) ? json.orders : null);
+    if (!rawOrders) { showToast('❌ Unexpected response from Apps Script: ' + JSON.stringify(json).slice(0,120), 'error'); return; }
     if (!rawOrders.length) { showToast('No new Shopify orders found in Gmail.', 'info'); return; }
     // Convert Apps Script format to app format
     const orders = rawOrders.map(o => ({
