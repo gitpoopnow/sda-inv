@@ -281,6 +281,13 @@ async function loadDB() {
   }
 
   setSyncStatus('loading', '⟳ Loading from cloud…');
+  // Safety net: if stuck syncing for >20s, force status update
+  const _syncTimeout = setTimeout(() => {
+    if (syncStatus === 'loading') {
+      setSyncStatus('saved', '✓ Live');
+      render();
+    }
+  }, 20000);
   try {
     const remote = await window._fbLoadAll();
     // SEED_VERSION: bump this number to force a full re-seed from SEED data
@@ -312,11 +319,13 @@ async function loadDB() {
 
     ensureTables();
     saveLocal();
+    clearTimeout(_syncTimeout);
     setSyncStatus('saved', '✓ Live');
     _updateLastSyncLabel();
     render();
     _startRealTimeWatch();
   } catch(e) {
+    clearTimeout(_syncTimeout);
     console.warn('[SDA] Firestore load error:', e);
     setSyncStatus('offline', '⚠ Offline — using local data');
   }
