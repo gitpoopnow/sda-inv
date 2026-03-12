@@ -781,7 +781,7 @@ let invEditing = null;
 let invFilters = {search:'',section:'',status:''};
 function renderInventory() {
   const rec = invEditing||{};
-  let rows = DB.inventory;
+  let rows = [...DB.inventory].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
   if(invFilters.search) { const t=invFilters.search.toLowerCase(); rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t)); }
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
   if(invFilters.status) rows=rows.filter(r=>r.status===invFilters.status);
@@ -882,7 +882,7 @@ function submitInv(e) {
   } else addRow('inventory',r);
 }
 function renderInvTable() {
-  let rows = DB.inventory;
+  let rows = [...DB.inventory].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
   // Tab filtering: Active = everything except sold; Sold = only sold; default = Active
   const tab = invFilters.invTab || 'active';
   if(tab === 'active') rows = rows.filter(r => r.status !== 'sold');
@@ -1316,7 +1316,8 @@ function renderSales() {
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted)">${g.serialNumber||'—'}</span>`).join('<br>')}`:''}</td>
       <td>${r.customerName||'—'}${r.hasShipTo==='yes'?`<br><span style="font-size:10px;color:var(--accent);font-weight:700">📦 Ship To: ${r.shipToName||r.shipToAddress||'diff. address'}</span>`:''}</td>
       <td class="m">${r.businessName||'—'}</td>
-      <td class="m">${r.invNumber||'—'}</td>
+      <td class="m">${r.shopifyOrderNum||'—'}</td>
+      <td>${r.invNumber||'—'}</td>
       <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
       <td class="m">${r.saleDate||'—'}</td>
       <td>${r.paymentStatus?`<span class="badge bg-orange">${r.paymentStatus}</span>`:'—'}</td>
@@ -1663,22 +1664,106 @@ function addExtraGame() {
   if (!wrap) return;
   const idx = wrap.querySelectorAll('.additional-game-row').length;
   const gameNum = idx + 2;
+  const rowId = 'ag-row-' + Date.now();
   const row = document.createElement('div');
   row.className = 'additional-game-row';
+  row.id = rowId;
   row.dataset.idx = idx;
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
+  row.style.cssText = 'margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
   row.innerHTML = `
-    <div>
-      <label class="fl">GAME #${gameNum}</label>
-      <input class="ag-name" placeholder="Game title…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
-    </div>
-    <div>
-      <label class="fl">SERIAL / INV ID</label>
-      <input class="ag-serial" placeholder="Serial or TBD…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
-    </div>
-    <button type="button" onclick="this.closest('.additional-game-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>`;
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+      <div style="position:relative">
+        <label class="fl">GAME #${gameNum}</label>
+        <input class="ag-name" placeholder="Type game title…"
+          oninput="agTitleSearch(this,'${rowId}')" onfocus="agTitleSearch(this,'${rowId}')" autocomplete="off"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+        <div class="ag-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--panel);border:1px solid var(--border);border-radius:9px;margin-top:3px;max-height:200px;overflow-y:auto;box-shadow:0 8px 28px rgba(0,0,0,.7)"></div>
+      </div>
+      <div>
+        <label class="fl">SERIAL NUMBER</label>
+        <select class="ag-serial-select"
+          onchange="agSerialSelectChange(this)"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+          <option value="">— Pick a game first —</option>
+        </select>
+        <input type="hidden" class="ag-serial" value="">
+        <input type="hidden" class="ag-inv-id" value="">
+      </div>
+      <button type="button" onclick="this.closest('.additional-game-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>
+    </div>`;
   wrap.appendChild(row);
   row.querySelector('.ag-name').focus();
+}
+
+function agTitleSearch(inp, rowId) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  const drop = row.querySelector('.ag-drop');
+  const q = inp.value.toLowerCase().trim();
+  const allActive = (DB.inventory||[]).filter(i => i.status !== 'sold');
+  const seen = new Set();
+  const titles = allActive.filter(i => {
+    const mn = (i.machineName||'').toLowerCase();
+    if (!q || mn.includes(q)) {
+      if (!seen.has(mn)) { seen.add(mn); return true; }
+    }
+    return false;
+  });
+  if (!titles.length) { drop.style.display='none'; return; }
+  drop.innerHTML = titles.slice(0,20).map(g => {
+    const count = allActive.filter(i=>(i.machineName||'').toLowerCase().trim()===(g.machineName||'').toLowerCase().trim()).length;
+    return `<div onmousedown="agTitleSelect(event,'${rowId}')" data-name="${g.machineName.replace(/"/g,'&quot;')}"
+      style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"
+      onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
+      <span style="font-size:13px;font-weight:600">${g.machineName}</span>
+      <span style="font-size:11px;color:var(--muted);font-family:monospace">${count} unit${count!==1?'s':''}</span>
+    </div>`;
+  }).join('');
+  drop.style.display = 'block';
+}
+
+function agTitleSelect(e, rowId) {
+  e.preventDefault();
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  const machineName = e.currentTarget.dataset.name;
+  const inp = row.querySelector('.ag-name');
+  if (inp) inp.value = machineName;
+  const drop = row.querySelector('.ag-drop');
+  if (drop) drop.style.display = 'none';
+  // Build serial dropdown
+  const sel = row.querySelector('.ag-serial-select');
+  if (sel) {
+    const mn = machineName.toLowerCase().trim();
+    const matches = (DB.inventory||[]).filter(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn);
+    let opts = '<option value="">— Select serial —</option>';
+    opts += '<option value="TBD">⏳ TBD — assign later</option>';
+    matches.forEach(i => {
+      const label = i.serialNumber ? `SN: ${i.serialNumber}` : `(no serial)`;
+      const sub = i.location ? ` · ${i.location}` : '';
+      opts += `<option value="${i.id}" data-serial="${i.serialNumber||''}">${label}${sub} · ${i.status}</option>`;
+    });
+    sel.innerHTML = opts;
+    // Auto-select if only one real option
+    const realOpts = Array.from(sel.options).filter(o => o.value && o.value !== 'TBD');
+    if (realOpts.length === 1) { sel.value = realOpts[0].value; agSerialSelectChange(sel); }
+  }
+}
+
+function agSerialSelectChange(sel) {
+  const row = sel.closest('.additional-game-row');
+  if (!row) return;
+  const serialHidden = row.querySelector('.ag-serial');
+  const invIdHidden = row.querySelector('.ag-inv-id');
+  const val = sel.value;
+  if (val === '' || val === 'TBD') {
+    if (serialHidden) serialHidden.value = val === 'TBD' ? 'TBD' : '';
+    if (invIdHidden) invIdHidden.value = '';
+  } else {
+    const inv = (DB.inventory||[]).find(i => i.id === val);
+    if (serialHidden) serialHidden.value = inv ? (inv.serialNumber||'') : '';
+    if (invIdHidden) invIdHidden.value = val;
+  }
 }
 
 function collectAdditionalGames() {
@@ -1686,8 +1771,12 @@ function collectAdditionalGames() {
   const games = [];
   rows.forEach(row => {
     const name = (row.querySelector('.ag-name')?.value || '').trim();
-    const serial = (row.querySelector('.ag-serial')?.value || '').trim();
-    if (name) games.push({ machineName: name, serialNumber: serial });
+    // Support both new picker (hidden input) and legacy plain input
+    const serialHidden = row.querySelector('.ag-serial');
+    const invIdHidden = row.querySelector('.ag-inv-id');
+    const serial = serialHidden ? (serialHidden.value||'').trim() : (row.querySelector('input[placeholder*="Serial"]')?.value||'').trim();
+    const inventoryId = invIdHidden ? (invIdHidden.value||'').trim() : '';
+    if (name) games.push({ machineName: name, serialNumber: serial, inventoryId });
   });
   return games;
 }
@@ -4270,6 +4359,12 @@ function _setupDelegatedListeners() {
     } else if (id === 'ps-search-input') {
       psSearch = e.target.value;
       renderPSTable();
+    }
+  });
+  // Close ag-drop dropdowns on outside click
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.additional-game-row')) {
+      document.querySelectorAll('.ag-drop').forEach(d => d.style.display='none');
     }
   });
 }
