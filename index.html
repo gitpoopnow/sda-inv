@@ -563,6 +563,7 @@ function goto(s, preset) {
 
 // ── PAGINATION ────────────────────────────────────────────────
 let invPage=0, salePage=0, partsPage=0;
+let fulTab = 'pending';
 const PER = 9999;
 function paginate(rows, page) {
   const total = rows.length;
@@ -737,7 +738,7 @@ function badge(v, map) {
   const cls = map[v] || 'bg-blue';
   return `<span class="badge ${cls}">${v||'—'}</span>`;
 }
-const statusBadge = {in_stock:'bg-green',sold:'bg-red',on_location:'bg-purple',reserved:'bg-yellow',pending:'bg-yellow',closed:'bg-green',open:'bg-blue',delivered:'bg-green',cancelled:'bg-red'};
+const statusBadge = {in_stock:'bg-green',sold:'bg-red',on_location:'bg-purple',reserved:'bg-yellow',pre_order:'bg-orange',pending:'bg-yellow',closed:'bg-green',open:'bg-blue',delivered:'bg-green',cancelled:'bg-red'};
 
 // ── DASHBOARD ─────────────────────────────────────────────────
 function renderDashboard() {
@@ -781,22 +782,33 @@ let invEditing = null;
 let invFilters = {search:'',section:'',status:''};
 function renderInventory() {
   const rec = invEditing||{};
-  let rows = [...DB.inventory].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
+  let rows = DB.inventory;
+  const invTab = invFilters.invTab || 'in_stock';
+  if(invTab === '_active') rows = rows.filter(r => r.status !== 'sold');
+  else if(invTab === 'sold') rows = rows.filter(r => r.status === 'sold');
+  else rows = rows.filter(r => r.status === invTab);
   if(invFilters.search) { const t=invFilters.search.toLowerCase(); rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t)); }
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
-  if(invFilters.status) rows=rows.filter(r=>r.status===invFilters.status);
   const pg = paginate(rows, invPage);
   const sections = [...new Set(DB.inventory.map(r=>r.section).filter(Boolean))];
   return `
   <h1 class="pt">Inventory</h1>
-  <div style="display:flex;gap:0;margin-bottom:14px;border-bottom:2px solid var(--border)">
-    <button id="inv-tab-active" onclick="invFilters.invTab='active';invFilters.status='';invPage=0;document.getElementById('inv-tab-active').style.background='var(--accent)';document.getElementById('inv-tab-active').style.color='#fff';document.getElementById('inv-tab-sold').style.background='var(--panel2)';document.getElementById('inv-tab-sold').style.color='var(--muted)';document.getElementById('inv-status-filter').style.display='';renderInvTable()" style="padding:8px 22px;font-size:13px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${(!invFilters.invTab||invFilters.invTab==='active')?'var(--accent)':'var(--panel2)'};color:${(!invFilters.invTab||invFilters.invTab==='active')?'#fff':'var(--muted)'}">📦 Active (${DB.inventory.filter(r=>r.status!=='sold').length})</button>
-    <button id="inv-tab-sold" onclick="invFilters.invTab='sold';invFilters.status='sold';invPage=0;document.getElementById('inv-tab-sold').style.background='var(--red)';document.getElementById('inv-tab-sold').style.color='#fff';document.getElementById('inv-tab-active').style.background='var(--panel2)';document.getElementById('inv-tab-active').style.color='var(--muted)';document.getElementById('inv-status-filter').style.display='none';renderInvTable()" style="padding:8px 22px;font-size:13px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;transition:background .15s;background:${invFilters.invTab==='sold'?'var(--red)':'var(--panel2)'};color:${invFilters.invTab==='sold'?'#fff':'var(--muted)'}">✅ Sold (${DB.inventory.filter(r=>r.status==='sold').length})</button>
+  <div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid var(--border)">
+    ${[
+      {id:'inv-tab-in_stock',  label:'📦 In Stock',    status:'in_stock',   color:'var(--green)',  count:DB.inventory.filter(r=>r.status==='in_stock').length},
+      {id:'inv-tab-on_location',label:'📍 On Location',status:'on_location',color:'var(--purple)', count:DB.inventory.filter(r=>r.status==='on_location').length},
+      {id:'inv-tab-reserved',  label:'🔒 Reserved',    status:'reserved',   color:'var(--yellow)', count:DB.inventory.filter(r=>r.status==='reserved').length},
+      {id:'inv-tab-pre_order', label:'🛒 Pre-Order',   status:'pre_order',  color:'var(--orange)', count:DB.inventory.filter(r=>r.status==='pre_order').length},
+      {id:'inv-tab-all_active',label:'📋 All Active',  status:'_active',    color:'var(--accent)', count:DB.inventory.filter(r=>r.status!=='sold').length},
+      {id:'inv-tab-sold',      label:'✅ Sold',         status:'sold',       color:'var(--red)',    count:DB.inventory.filter(r=>r.status==='sold').length},
+    ].map(t=>{
+      const active = invFilters.invTab===t.status || (!invFilters.invTab && t.status==='in_stock');
+      return `<button id="${t.id}" onclick="invFilters.invTab='${t.status}';invFilters.status=${t.status==='_active'?`''`:`'${t.status}'`};invPage=0;renderInvTable()" style="padding:8px 16px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'}">${t.label} (${t.count})</button>`;
+    }).join('')}
   </div>
   <div class="filters">
     <input id="inv-search-input" placeholder="🔍 Search name, serial, location…" value="${invFilters.search}">
     <select onchange="invFilters.section=this.value;invPage=0;renderInvTable()"><option value="">All Locations</option>${sections.map(s=>`<option${invFilters.section===s?' selected':''}>${s}</option>`).join('')}</select>
-    ${(!invFilters.invTab||invFilters.invTab==='active')?`<select id="inv-status-filter" onchange="invFilters.status=this.value;invPage=0;renderInvTable()"><option value="">All Status</option>${['in_stock','on_location','reserved'].map(s=>`<option${invFilters.status===s?' selected':''}>${s}</option>`).join('')}</select>`:`<select id="inv-status-filter" style="display:none" onchange="invFilters.status=this.value;invPage=0;renderInvTable()"><option value="">All Status</option>${['in_stock','on_location','reserved'].map(s=>`<option${invFilters.status===s?' selected':''}>${s}</option>`).join('')}</select>`}
   </div>
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${invEditing?'✏️ Edit':'➕ Add'} Inventory</h3>
@@ -810,7 +822,7 @@ function renderInventory() {
         <div class="fw"><label class="fl">DATE SOLD</label><input type="date" name="dateSold" value="${rec.dateSold||''}"></div>
         <div class="fw"><label class="fl">COST ($)</label><input type="number" step="0.01" name="cost" value="${rec.cost||''}"></div>
         <div class="fw"><label class="fl">SHELF / SPOT</label><input name="location" value="${rec.location||''}" placeholder="BAR-1, B-T1-3, BDK…"></div>
-        <div class="fw"><label class="fl">STATUS</label><select name="status">${['in_stock','sold','on_location','reserved'].map(s=>`<option${(rec.status||'in_stock')===s?' selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="fw"><label class="fl">STATUS</label><select name="status">${['in_stock','sold','on_location','reserved','pre_order'].map(s=>`<option${(rec.status||'in_stock')===s?' selected':''}>${s}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">PAYMENT STATUS</label><input name="paymentStatus" list="dl-pay-inv" value="${rec.paymentStatus||''}" placeholder="PIF, ACH, CASH…"></div>
       </div>
       <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${rec.notes||''}</textarea></div>
@@ -882,14 +894,14 @@ function submitInv(e) {
   } else addRow('inventory',r);
 }
 function renderInvTable() {
-  let rows = [...DB.inventory].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
-  // Tab filtering: Active = everything except sold; Sold = only sold; default = Active
-  const tab = invFilters.invTab || 'active';
-  if(tab === 'active') rows = rows.filter(r => r.status !== 'sold');
+  let rows = DB.inventory;
+  // Tab filtering: status tabs filter directly; _active = all non-sold; sold = only sold; default = in_stock
+  const tab = invFilters.invTab || 'in_stock';
+  if(tab === '_active') rows = rows.filter(r => r.status !== 'sold');
   else if(tab === 'sold') rows = rows.filter(r => r.status === 'sold');
+  else rows = rows.filter(r => r.status === tab);
   if(invFilters.search){const t=invFilters.search.toLowerCase();rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t));}
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
-  if(invFilters.status && tab==='active') rows=rows.filter(r=>r.status===invFilters.status);
   const pg=paginate(rows,invPage);
   const tbody=document.getElementById('inv-tbody');
   if(tbody) tbody.innerHTML=pg.rows.map(r=>`<tr>
@@ -1316,8 +1328,7 @@ function renderSales() {
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted)">${g.serialNumber||'—'}</span>`).join('<br>')}`:''}</td>
       <td>${r.customerName||'—'}${r.hasShipTo==='yes'?`<br><span style="font-size:10px;color:var(--accent);font-weight:700">📦 Ship To: ${r.shipToName||r.shipToAddress||'diff. address'}</span>`:''}</td>
       <td class="m">${r.businessName||'—'}</td>
-      <td class="m">${r.shopifyOrderNum||'—'}</td>
-      <td>${r.invNumber||'—'}</td>
+      <td class="m">${r.invNumber||'—'}</td>
       <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
       <td class="m">${r.saleDate||'—'}</td>
       <td>${r.paymentStatus?`<span class="badge bg-orange">${r.paymentStatus}</span>`:'—'}</td>
@@ -1664,106 +1675,22 @@ function addExtraGame() {
   if (!wrap) return;
   const idx = wrap.querySelectorAll('.additional-game-row').length;
   const gameNum = idx + 2;
-  const rowId = 'ag-row-' + Date.now();
   const row = document.createElement('div');
   row.className = 'additional-game-row';
-  row.id = rowId;
   row.dataset.idx = idx;
-  row.style.cssText = 'margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
   row.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
-      <div style="position:relative">
-        <label class="fl">GAME #${gameNum}</label>
-        <input class="ag-name" placeholder="Type game title…"
-          oninput="agTitleSearch(this,'${rowId}')" onfocus="agTitleSearch(this,'${rowId}')" autocomplete="off"
-          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
-        <div class="ag-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--panel);border:1px solid var(--border);border-radius:9px;margin-top:3px;max-height:200px;overflow-y:auto;box-shadow:0 8px 28px rgba(0,0,0,.7)"></div>
-      </div>
-      <div>
-        <label class="fl">SERIAL NUMBER</label>
-        <select class="ag-serial-select"
-          onchange="agSerialSelectChange(this)"
-          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
-          <option value="">— Pick a game first —</option>
-        </select>
-        <input type="hidden" class="ag-serial" value="">
-        <input type="hidden" class="ag-inv-id" value="">
-      </div>
-      <button type="button" onclick="this.closest('.additional-game-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>
-    </div>`;
+    <div>
+      <label class="fl">GAME #${gameNum}</label>
+      <input class="ag-name" placeholder="Game title…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+    </div>
+    <div>
+      <label class="fl">SERIAL / INV ID</label>
+      <input class="ag-serial" placeholder="Serial or TBD…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px">
+    </div>
+    <button type="button" onclick="this.closest('.additional-game-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>`;
   wrap.appendChild(row);
   row.querySelector('.ag-name').focus();
-}
-
-function agTitleSearch(inp, rowId) {
-  const row = document.getElementById(rowId);
-  if (!row) return;
-  const drop = row.querySelector('.ag-drop');
-  const q = inp.value.toLowerCase().trim();
-  const allActive = (DB.inventory||[]).filter(i => i.status !== 'sold');
-  const seen = new Set();
-  const titles = allActive.filter(i => {
-    const mn = (i.machineName||'').toLowerCase();
-    if (!q || mn.includes(q)) {
-      if (!seen.has(mn)) { seen.add(mn); return true; }
-    }
-    return false;
-  });
-  if (!titles.length) { drop.style.display='none'; return; }
-  drop.innerHTML = titles.slice(0,20).map(g => {
-    const count = allActive.filter(i=>(i.machineName||'').toLowerCase().trim()===(g.machineName||'').toLowerCase().trim()).length;
-    return `<div onmousedown="agTitleSelect(event,'${rowId}')" data-name="${g.machineName.replace(/"/g,'&quot;')}"
-      style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"
-      onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
-      <span style="font-size:13px;font-weight:600">${g.machineName}</span>
-      <span style="font-size:11px;color:var(--muted);font-family:monospace">${count} unit${count!==1?'s':''}</span>
-    </div>`;
-  }).join('');
-  drop.style.display = 'block';
-}
-
-function agTitleSelect(e, rowId) {
-  e.preventDefault();
-  const row = document.getElementById(rowId);
-  if (!row) return;
-  const machineName = e.currentTarget.dataset.name;
-  const inp = row.querySelector('.ag-name');
-  if (inp) inp.value = machineName;
-  const drop = row.querySelector('.ag-drop');
-  if (drop) drop.style.display = 'none';
-  // Build serial dropdown
-  const sel = row.querySelector('.ag-serial-select');
-  if (sel) {
-    const mn = machineName.toLowerCase().trim();
-    const matches = (DB.inventory||[]).filter(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn);
-    let opts = '<option value="">— Select serial —</option>';
-    opts += '<option value="TBD">⏳ TBD — assign later</option>';
-    matches.forEach(i => {
-      const label = i.serialNumber ? `SN: ${i.serialNumber}` : `(no serial)`;
-      const sub = i.location ? ` · ${i.location}` : '';
-      opts += `<option value="${i.id}" data-serial="${i.serialNumber||''}">${label}${sub} · ${i.status}</option>`;
-    });
-    sel.innerHTML = opts;
-    // Auto-select if only one real option
-    const realOpts = Array.from(sel.options).filter(o => o.value && o.value !== 'TBD');
-    if (realOpts.length === 1) { sel.value = realOpts[0].value; agSerialSelectChange(sel); }
-  }
-}
-
-function agSerialSelectChange(sel) {
-  const row = sel.closest('.additional-game-row');
-  if (!row) return;
-  const serialHidden = row.querySelector('.ag-serial');
-  const invIdHidden = row.querySelector('.ag-inv-id');
-  const val = sel.value;
-  if (val === '' || val === 'TBD') {
-    if (serialHidden) serialHidden.value = val === 'TBD' ? 'TBD' : '';
-    if (invIdHidden) invIdHidden.value = '';
-  } else {
-    const inv = (DB.inventory||[]).find(i => i.id === val);
-    if (serialHidden) serialHidden.value = inv ? (inv.serialNumber||'') : '';
-    if (invIdHidden) invIdHidden.value = val;
-  }
 }
 
 function collectAdditionalGames() {
@@ -1771,12 +1698,8 @@ function collectAdditionalGames() {
   const games = [];
   rows.forEach(row => {
     const name = (row.querySelector('.ag-name')?.value || '').trim();
-    // Support both new picker (hidden input) and legacy plain input
-    const serialHidden = row.querySelector('.ag-serial');
-    const invIdHidden = row.querySelector('.ag-inv-id');
-    const serial = serialHidden ? (serialHidden.value||'').trim() : (row.querySelector('input[placeholder*="Serial"]')?.value||'').trim();
-    const inventoryId = invIdHidden ? (invIdHidden.value||'').trim() : '';
-    if (name) games.push({ machineName: name, serialNumber: serial, inventoryId });
+    const serial = (row.querySelector('.ag-serial')?.value || '').trim();
+    if (name) games.push({ machineName: name, serialNumber: serial });
   });
   return games;
 }
@@ -3218,7 +3141,7 @@ const FULFIL_FIELDS = [
   {k:'liftgate',l:'LIFTGATE',type:'datalist',opts:['Yes','No','Yes - Residential','Yes - Business','No - Has Dock']},
   {k:'machineName',l:'MACHINE'},{k:'serialNumber',l:'SERIAL #',type:'serial_picker'},{k:'invNumber',l:'INV #'},
   {k:'method',l:'METHOD',type:'select',opts:['shipping','drop_ship','local_delivery','pickup'],def:'shipping'},
-  {k:'status',l:'STATUS',type:'select',opts:['pending','in_progress','delivered','cancelled'],def:'pending'},
+  {k:'status',l:'STATUS',type:'select',opts:['pending','in_transit','delivered','cancelled'],def:'pending'},
   {k:'carrier',l:'CARRIER',type:'datalist',opts:['XPO Logistics','Forward Air','R+L Carriers','TForce Freight','Estes Express','Dayton Freight','Pitt Ohio','ABF Freight','Roadrunner Freight','Oak Harbor Freight','Daylight Transport','Total Transportation','Sutton Transport','Tax Airfreight','Magnum Logistics','Mountain Valley Express','Dedicated Delivery Professionals','FedEx','USPS','Other']},
   {k:'trackingNumber',l:'TRACKING #'},{k:'trackingLink',l:'TRACKING LINK'},
   {k:'scheduledDate',l:'DATE SHIPPED',type:'date'},
@@ -3245,7 +3168,7 @@ const FULFIL_COLS = [
   {k:'carrier',       l:'CARRIER',    w:'88px',  nowrap:true},
   {k:'trackingNumber',l:'TRACKING',   w:'110px', nowrap:true},
   {k:'scheduledDate', l:'SHIPPED',    w:'84px',  nowrap:true},
-  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_progress:'bg-blue',delivered:'bg-green',cancelled:'bg-red'}},
+  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_transit:'bg-blue',delivered:'bg-green',cancelled:'bg-red'}},
 ];
 
 function buildEmailPreview(rec) {
@@ -3382,7 +3305,13 @@ function renderFulfillment() {
     return `<div class="fw"><label class="fl">${f.l}</label><input type="${f.type||'text'}" name="${f.k}" value="${(rec[f.k]||f.def||'').replace ? (rec[f.k]||'').replace(/"/g,'&quot;') : (rec[f.k]||f.def||'')}" ${f.req?'required':''} oninput="fulfillmentFieldChanged()"></div>`;
   }).join('');
 
-  const tableRows = DB.fulfillment.map(r => {
+  const allFulfil = DB.fulfillment || [];
+  const filteredFulfil = fulTab === 'all' ? allFulfil : allFulfil.filter(r => {
+    const s = r.status === 'in_progress' ? 'in_transit' : r.status;
+    return s === fulTab;
+  });
+
+  const tableRows = filteredFulfil.map(r => {
     const cells = FULFIL_COLS.map(c => {
       let v = r[c.k];
       const style = c.nowrap ? ' style="white-space:nowrap"' : '';
@@ -3403,6 +3332,19 @@ function renderFulfillment() {
     </div></td></tr>`;
   }).join('') || `<tr><td colspan="${FULFIL_COLS.length+1}" class="empty">No records yet.</td></tr>`;
 
+  const fulTabs = [
+    {id:'pending',    label:'⏳ Pending',    color:'var(--yellow)', count:allFulfil.filter(r=>r.status==='pending').length},
+    {id:'in_transit', label:'🚚 In Transit',  color:'var(--accent)', count:allFulfil.filter(r=>r.status==='in_transit').length},
+    {id:'delivered',  label:'✅ Delivered',   color:'var(--green)',  count:allFulfil.filter(r=>r.status==='delivered').length},
+    {id:'all',        label:'📋 All',         color:'var(--muted)',  count:allFulfil.length},
+  ];
+  const fulTabsHtml = `<div style="display:flex;gap:0;margin-bottom:10px;border-bottom:2px solid var(--border)">
+    ${fulTabs.map(t=>{
+      const active = fulTab===t.id;
+      return `<button onclick="fulTab='${t.id}';render()" style="padding:8px 18px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'}">${t.label} (${t.count})</button>`;
+    }).join('')}
+  </div>`;
+
   return `
   <h1 class="pt">Fulfillment</h1>
   <input placeholder="🔍 Search…" oninput="filterTbl('fulfillment-tbody','fulfillment',this.value,${JSON.stringify(FULFIL_FIELDS.map(f=>f.k))})" style="border-radius:9px;padding:8px 14px;margin-bottom:12px">
@@ -3417,6 +3359,7 @@ function renderFulfillment() {
     </form>
   </div>
   ${emailPanel}
+  ${fulTabsHtml}
   <div class="panel" style="padding:10px 8px"><div style="width:100%;overflow-x:auto"><table class="fulfil-tbl" style="width:100%;table-layout:fixed;font-size:11.5px">
     <colgroup>${FULFIL_COLS.map(c=>`<col style="width:${c.w||'80px'}">`).join('')}<col style="width:100px"></colgroup>
     <thead><tr style="font-size:10px;letter-spacing:.04em">${FULFIL_COLS.map(c=>`<th style="white-space:nowrap;padding:6px 6px">${c.l}</th>`).join('')}<th style="text-align:right;padding-right:6px"></th></tr></thead>
@@ -4359,12 +4302,6 @@ function _setupDelegatedListeners() {
     } else if (id === 'ps-search-input') {
       psSearch = e.target.value;
       renderPSTable();
-    }
-  });
-  // Close ag-drop dropdowns on outside click
-  document.addEventListener('click', function(e) {
-    if (!e.target.closest('.additional-game-row')) {
-      document.querySelectorAll('.ag-drop').forEach(d => d.style.display='none');
     }
   });
 }
