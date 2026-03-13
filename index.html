@@ -61,7 +61,33 @@ window._fbLoadAll = async () => {
 // Save a single record to its collection
 window._fbSaveRecord = async (col, record) => {
   if (!_db || !record || !record.id) return;
-  await _db.collection(col).doc(record.id).set(record);
+  // Optimistic concurrency: check if another client has written a newer version
+  // Only check records that have updatedAt (i.e. were previously saved)
+  if (record.updatedAt) {
+    try {
+      const serverDoc = await _db.collection(col).doc(record.id).get();
+      if (serverDoc.exists) {
+        const serverData = serverDoc.data();
+        const serverTs = serverData && serverData.updatedAt ? serverData.updatedAt : null;
+        const localEditedFrom = record._editedFrom || record.updatedAt;
+        // If server has a newer updatedAt than what we started editing from, conflict
+        if (serverTs && serverTs > localEditedFrom && serverTs !== record.updatedAt) {
+          console.warn('[SDA] Conflict detected on', col, record.id, '— server:', serverTs, 'local:', record.updatedAt);
+          // Show conflict warning (non-blocking — local save still wins to avoid data loss)
+          if (typeof showToast === 'function') {
+            showToast(`⚠️ Sync conflict on ${record.machineName || record.customerName || record.id} — another device also saved this record. Your change was kept.`, 'error');
+          }
+        }
+      }
+    } catch(e) {
+      // Don't block the save on conflict check failure
+      console.warn('[SDA] Conflict check error:', e);
+    }
+  }
+  // Clean up internal tracking field before writing to Firestore
+  const toSave = { ...record };
+  delete toSave._editedFrom;
+  await _db.collection(col).doc(record.id).set(toSave);
 };
 
 // Delete a single record
@@ -215,7 +241,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.08'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.09'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -350,7 +376,7 @@ try {
     if (e.data === 'reload') {
       // Don't reload if we have pending saves — our local data is newer
       if (Object.keys(_saveQueue).length > 0 || _saveTimer) return;
-      if (Date.now() - _lastSaveTime < 2000) return;
+      if (Date.now() - _lastSaveTime < 5000) return;
       loadLocal();
       ensureTables();
       render();
@@ -375,6 +401,10 @@ function _startRealTimeWatch() {
       const anyInputFocused = document.activeElement &&
         ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
       if (anyInputFocused) return;
+
+      // Belt-and-suspenders: also block for 15s after any local save to absorb
+      // Firestore echo (listener fires even for our own writes)
+      if (Date.now() - _lastSaveTime < 15000) return;
 
       // Record-level merge: only block records with a pending local save.
       // This fixes the multi-computer sync bug where the broad 8s guard caused
@@ -486,7 +516,16 @@ function buildTrackingUrl(carrier, trackingNumber) {
   return '';
 }
 function addRow(t,r) { const rec={id:uid(),createdAt:today(),updatedAt:new Date().toISOString(),...r}; DB[t].unshift(rec); saveDB(t,rec.id); render(); }
-function updateRow(t,id,r) { DB[t]=DB[t].map(x=>x.id===id?{...x,...r,updatedAt:new Date().toISOString()}:x); saveDB(t,id); render(); }
+function updateRow(t,id,r) {
+  DB[t] = DB[t].map(x => {
+    if (x.id !== id) return x;
+    // _editedFrom: tracks the updatedAt we started editing from, for conflict detection
+    const editedFrom = x.updatedAt || x.createdAt || '';
+    return { ...x, ...r, updatedAt: new Date().toISOString(), _editedFrom: editedFrom };
+  });
+  saveDB(t, id);
+  render();
+}
 function delRow(t,id) {
   if(!confirm('Delete this record?'))return;
   // CASCADE: If deleting an inventory item, clean up all linked records
