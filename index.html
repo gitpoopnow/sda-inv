@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.02'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.03'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -823,8 +823,9 @@ function renderInventory() {
   else rows = rows.filter(r => r.status === invTab);
   if(invFilters.search) { const t=invFilters.search.toLowerCase(); rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t)); }
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
+  rows = [...rows].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
   const pg = paginate(rows, invPage);
-  const sections = [...new Set(DB.inventory.map(r=>r.section).filter(Boolean))];
+  const sections = [...new Set(DB.inventory.map(r=>r.section).filter(Boolean))].sort();
   return `
   <h1 class="pt">Inventory</h1>
   <div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid var(--border)">
@@ -993,6 +994,7 @@ function renderInvTable() {
   else rows = rows.filter(r => r.status === tab);
   if(invFilters.search){const t=invFilters.search.toLowerCase();rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t));}
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
+  rows = [...rows].sort((a,b)=>(a.machineName||'').localeCompare(b.machineName||''));
   const pg=paginate(rows,invPage);
   const tbody=document.getElementById('inv-tbody');
   if(tbody) tbody.innerHTML=pg.rows.map(r=>`<tr>
