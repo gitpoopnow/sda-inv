@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.04'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.05'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -501,7 +501,7 @@ function delRow(t,id) {
     }
   }
   DB[t]=DB[t].filter(x=>x.id!==id);
-  saveLocal();
+  saveDB(); // Use saveDB (not just saveLocal) so cascaded inventory/fulfillment status changes sync to Firestore
   render();
   // Delete from Firestore
   if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
@@ -954,6 +954,12 @@ function submitInv(e) {
       });
     }
     invEditing=null;
+    // If name/serial changed, queue the cascaded linked records to Firestore too
+    if (nameChanged || serialChanged) {
+      (DB.sales||[]).forEach(s => { if (s.inventoryId === invId) _saveQueue['sales::'+s.id] = {col:'sales', record:s}; });
+      (DB.sold||[]).forEach(s => { if (s.inventoryId === invId) _saveQueue['sold::'+s.id] = {col:'sold', record:s}; });
+      (DB.fulfillment||[]).forEach(f => { if (f.inventoryId === invId) _saveQueue['fulfillment::'+f.id] = {col:'fulfillment', record:f}; });
+    }
     updateRow('inventory',invId,r);
   } else {
     // ── BULK ADD ──────────────────────────────────────────────
