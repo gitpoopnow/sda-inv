@@ -2950,7 +2950,8 @@ function convertShopifyToPreOrder(oi) {
     customerZip: order.customerZip,
   });
 
-  shopifyOrders[oi]._status = 'converted';
+  // Remove from the visible list immediately
+  shopifyOrders.splice(oi, 1);
 
   // Permanently dismiss so it never re-appears after a Gmail re-fetch
   if (order.shopifyOrderNum) {
@@ -4765,7 +4766,8 @@ async function _startApp(user) {
         <div class="dd" id="ddate"></div>
       </header>
       <main id="mc"></main>
-    </div>`;
+    </div>
+    <div id="ver-bar" style="position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);text-align:center;padding:3px 0;font-size:10px;font-weight:700;color:rgba(255,255,255,.35);letter-spacing:.08em;pointer-events:none;z-index:9999">SDA PINBALL INVENTORY &nbsp;·&nbsp; ${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</div>`;
     _delegatedListenersReady = false; // reset so listeners rebind on new DOM
   }
   const userEmailEl = document.getElementById('user-email');
@@ -4819,9 +4821,5 @@ async function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
-<div style="position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);text-align:center;padding:3px 0;font-size:10px;font-weight:700;color:rgba(255,255,255,.35);letter-spacing:.08em;pointer-events:none;z-index:9999">
-  SDA PINBALL INVENTORY &nbsp;·&nbsp; <span id="build-ver"></span>
-</div>
-<script>document.getElementById('build-ver').textContent = typeof BUILD_VERSION !== 'undefined' ? BUILD_VERSION : '—';</script>
 </body>
 </html>
