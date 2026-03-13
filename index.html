@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.00'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.02'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -239,6 +239,13 @@ function loadLocal() {
 // ── TABLES INIT ───────────────────────────────────────────────
 function ensureTables() {
   ALL_TABLES.forEach(t => { if (!DB[t]) DB[t] = []; });
+  // Migrate shopifyDismissed from plain strings to {id, orderNum} objects
+  // Firestore _fbSaveRecord requires .id — strings silently fail to save
+  if (DB.shopifyDismissed && DB.shopifyDismissed.length) {
+    DB.shopifyDismissed = DB.shopifyDismissed.map(r =>
+      typeof r === 'string' ? {id: r, orderNum: r, dismissedAt: ''} : r
+    );
+  }
 }
 
 // ── SYNC STATUS UI ────────────────────────────────────────────
@@ -388,7 +395,7 @@ function saveDB(col, id) {
     if (record) _saveQueue[col + '::' + id] = { col, record };
   } else {
     // No specific record — queue everything (used by complex operations)
-    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold'];
+    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','shopifyDismissed'];
     cols.forEach(c => {
       (DB[c] || []).forEach(r => {
         if (r && r.id) _saveQueue[c + '::' + r.id] = { col: c, record: r };
@@ -2962,13 +2969,16 @@ function showShopifyCatPicker(oi) {
 function dismissShopifyOrder(oi) {
   const order = shopifyOrders[oi];
   if (!order) return;
-  // Persist the dismissed order number so it never comes back from Gmail
+  // Persist as an object with .id so Firestore can save it (plain strings have no .id and silently fail)
   if (order.shopifyOrderNum) {
-    shopifyDismissed.add(order.shopifyOrderNum);
+    const orderNum = order.shopifyOrderNum;
+    shopifyDismissed.add(orderNum);
     if (!DB.shopifyDismissed) DB.shopifyDismissed = [];
-    if (!DB.shopifyDismissed.includes(order.shopifyOrderNum)) {
-      DB.shopifyDismissed.push(order.shopifyOrderNum);
-      saveDB();
+    const alreadyIn = DB.shopifyDismissed.some(r => (r.id || r) === orderNum);
+    if (!alreadyIn) {
+      const rec = {id: orderNum, orderNum, dismissedAt: new Date().toISOString()};
+      DB.shopifyDismissed.push(rec);
+      saveDB('shopifyDismissed', orderNum); // targeted save — guaranteed to reach Firestore
     }
   }
   shopifyOrders.splice(oi, 1);
@@ -3036,10 +3046,12 @@ function convertShopifyToPreOrder(oi) {
 
   // Permanently dismiss so it never re-appears after a Gmail re-fetch
   if (order.shopifyOrderNum) {
-    shopifyDismissed.add(order.shopifyOrderNum);
+    const orderNum = order.shopifyOrderNum;
+    shopifyDismissed.add(orderNum);
     if (!DB.shopifyDismissed) DB.shopifyDismissed = [];
-    if (!DB.shopifyDismissed.includes(order.shopifyOrderNum)) {
-      DB.shopifyDismissed.push(order.shopifyOrderNum);
+    const alreadyIn = DB.shopifyDismissed.some(r => (r.id || r) === orderNum);
+    if (!alreadyIn) {
+      DB.shopifyDismissed.push({id: orderNum, orderNum, dismissedAt: new Date().toISOString()});
     }
   }
 
@@ -3114,7 +3126,7 @@ async function fetchShopifyFromGmail() {
     });
     // Merge — avoid duplicates and already-dismissed orders
     const existingNums = new Set(shopifyOrders.map(o => o.shopifyOrderNum));
-    const dismissed = new Set(DB.shopifyDismissed || []);
+    const dismissed = new Set((DB.shopifyDismissed || []).map(r => r.id || r));
     const newOrders = orders.filter(o => !existingNums.has(o.shopifyOrderNum) && !dismissed.has(o.shopifyOrderNum));
     shopifyOrders = [...newOrders, ...shopifyOrders];
     showToast(`✅ Found ${newOrders.length} new order${newOrders.length!==1?'s':''}!`);
@@ -4858,7 +4870,7 @@ async function _startApp(user) {
   render();
   await loadDB();
   ensureTables();
-  shopifyDismissed = new Set(DB.shopifyDismissed || []);
+  shopifyDismissed = new Set((DB.shopifyDismissed || []).map(r => r.id || r));
   render();
 }
 
