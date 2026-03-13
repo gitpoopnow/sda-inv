@@ -45,7 +45,7 @@ const ALLOWED_EMAILS = [
 // ── COLLECTIONS ───────────────────────────────────────────────
 // Each top-level key in DB gets its own Firestore collection.
 // Records are stored as documents keyed by record.id
-const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
+const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','_meta'];
 
 // Load all collections from Firestore in parallel
 window._fbLoadAll = async () => {
@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.06'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.07'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -419,7 +419,7 @@ function saveDB(col, id) {
     if (record) _saveQueue[col + '::' + id] = { col, record };
   } else {
     // No specific record — queue everything (used by complex operations)
-    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','shopifyDismissed'];
+    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
     cols.forEach(c => {
       (DB[c] || []).forEach(r => {
         if (r && r.id) _saveQueue[c + '::' + r.id] = { col: c, record: r };
@@ -4822,11 +4822,22 @@ function _updateLastSyncLabel() {
 
 async function forceSyncNow() {
   if (!window._fbUser) { alert('Not signed in.'); return; }
+
+  // Flush any pending local saves before pulling from cloud
+  const hasPending = Object.keys(_saveQueue).length > 0 || !!_saveTimer;
+  if (hasPending) {
+    clearTimeout(_saveTimer);
+    _saveTimer = null;
+    setSyncStatus('saving', '⟳ Flushing pending saves…');
+    try { await pushToDB(); } catch(e) {}
+  }
+
   setSyncStatus('loading', '⟳ Syncing…');
   try {
     const remote = await window._fbLoadAll();
     DB_COLLECTIONS.forEach(col => {
-      if (remote[col] !== undefined) DB[col] = remote[col]; // remote is source of truth even if empty
+      if (col === '_meta') return; // never overwrite local meta
+      if (remote[col] !== undefined) DB[col] = remote[col];
     });
     ensureTables();
     saveLocal();
