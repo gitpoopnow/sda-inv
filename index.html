@@ -4481,7 +4481,7 @@ function renderServiceCalls() {
   ${tabBar}
   ${tableHtml}`;
 }
-
+function renderWarrantyClaims() {
 
   const claims = DB.warrantyClaims || [];
   if (wcEditing && wcEditing.id && !claims.find(c => c.id === wcEditing.id)) wcEditing = null;
@@ -4618,6 +4618,40 @@ function renderServiceCalls() {
     </div>
   </div>`;
 
+  const tableHtml = claims.length === 0
+    ? '<div class="panel"><div class="empty">No warranty claims yet. Create one above.</div></div>'
+    : '<div class="panel" style="padding:0;overflow:hidden"><table><thead><tr><th>CUSTOMER</th><th>GAME</th><th>S/N</th><th>PROBLEM</th><th>PO #</th><th>PART</th><th>STATUS</th><th>EMAILED</th><th></th></tr></thead><tbody>' +
+      claims.map(c =>
+        '<tr>' +
+        '<td style="font-size:12px">' + escH(c.customerName||'—') + '</td>' +
+        '<td><div style="font-weight:700">' + escH(c.gameName||'—') + '</div><div style="font-size:11px;color:var(--muted)">' + escH(c.edition||'') + (c.claimType ? ' · '+c.claimType.replace('_',' ') : '') + '</div></td>' +
+        '<td style="font-family:monospace;font-size:12px">' + escH(c.serialNumber||'—') + '</td>' +
+        '<td style="max-width:140px;font-size:12px">' + escH((c.problem||'—').substring(0,60)) + ((c.problem||'').length>60?'…':'') + '</td>' +
+        '<td style="font-family:monospace;font-size:11px;color:var(--muted)">' + escH(c.poNumber||'—') + '</td>' +
+        '<td style="font-size:11px;max-width:110px">' + escH((c.partDesc||'—').substring(0,40)) + ((c.partDesc||'').length>40?'…':'') + '</td>' +
+        '<td><span class="badge ' + (wcStatusBadge[c.status]||'bg-blue') + '">' + escH((c.status||'pending').replace('_',' ').toUpperCase()) + '</span></td>' +
+        '<td style="font-size:11px;color:' + (c.emailSentDate?'var(--green)':'var(--muted)') + '">' + escH(c.emailSentDate||'—') + '</td>' +
+        '<td><div style="display:flex;gap:5px">' +
+          '<button class="btn sm warn" data-wc-id="' + c.id + '" onclick="wcEditing=DB.warrantyClaims.find(x=>x.id===this.dataset.wcId);render();window.scrollTo(0,0)">✏️ Edit</button>' +
+          '<button class="btn sm danger" onclick="if(wcEditing&&wcEditing.id===\'' + c.id + '\')wcEditing=null;delRow(\'warrantyClaims\',\'' + c.id + '\')">✕</button>' +
+        '</div></td>' +
+        '</tr>'
+      ).join('') +
+      '</tbody></table></div>';
+
+  return `
+  <h1 class="pt">🛡️ Warranty Claims</h1>
+  <div class="grid3" style="margin-bottom:18px">
+    <div class="stat"><div class="sl">TOTAL CLAIMS</div><div class="sv" style="color:var(--accent)">${claims.length}</div></div>
+    <div class="stat"><div class="sl">OPEN / PENDING</div><div class="sv" style="color:var(--yellow)">${open}</div></div>
+    <div class="stat"><div class="sl">APPROVED</div><div class="sv" style="color:var(--green)">${approved}</div></div>
+    <div class="stat"><div class="sl">RESOLVED</div><div class="sv" style="color:var(--purple)">${resolved}</div></div>
+    <div class="stat"><div class="sl">DENIED</div><div class="sv" style="color:var(--red)">${denied}</div></div>
+  </div>
+  ${formHtml}
+  <h3 class="st" style="margin-bottom:10px">CLAIMS HISTORY (${claims.length})</h3>
+  ${tableHtml}`;
+}
 
 // Single delegated input listener — set up ONCE at init, never re-added
 // This is the ONLY correct way to handle search in re-rendering apps
