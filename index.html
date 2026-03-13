@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.07'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.08'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -347,7 +347,10 @@ let _syncChannel = null;
 try {
   _syncChannel = new BroadcastChannel('sda_sync');
   _syncChannel.onmessage = (e) => {
-    if (e.data === 'reload' && Date.now() - _lastSaveTime > 2000) {
+    if (e.data === 'reload') {
+      // Don't reload if we have pending saves — our local data is newer
+      if (Object.keys(_saveQueue).length > 0 || _saveTimer) return;
+      if (Date.now() - _lastSaveTime < 2000) return;
       loadLocal();
       ensureTables();
       render();
@@ -1001,10 +1004,13 @@ function submitInv(e) {
         };
         const newRec = {id:uid(), createdAt:today(), updatedAt:new Date().toISOString(), ...rec};
         DB['inventory'].unshift(newRec);
-        // Save each to Firestore async (don't await to keep it fast)
-        window._fbSaveRecord && window._fbSaveRecord('inventory', newRec);
+        // Queue each record through the standard save path so _lastSaveTime is updated
+        if (window._fbReady && window._fbUser) _saveQueue['inventory::'+newRec.id] = {col:'inventory', record:newRec};
       }
+      _lastSaveTime = Date.now();
       saveLocal();
+      clearTimeout(_saveTimer);
+      _saveTimer = setTimeout(pushToDB, 1500);
       render();
       // Brief toast
       const toast = document.createElement('div');
@@ -1089,10 +1095,11 @@ function upsertCustomer(r) {
   fields.forEach(f => { if (r[f]) data[f] = r[f]; });
   if (!DB.customers) DB.customers = [];
   const idx = DB.customers.findIndex(c => (c.customerName||'').trim().toLowerCase() === key);
+  const _ts = new Date().toISOString();
   if (idx !== -1) {
-    DB.customers[idx] = { ...DB.customers[idx], ...data };
+    DB.customers[idx] = { ...DB.customers[idx], ...data, updatedAt: _ts };
   } else {
-    DB.customers.push({ id: uid(), ...data, createdAt: today() });
+    DB.customers.push({ id: uid(), ...data, createdAt: today(), updatedAt: _ts });
   }
 }
 
@@ -1616,10 +1623,10 @@ function confirmAssignSerial(saleId, invId, el) {
   if (sidx !== -1) DB.sales[sidx] = {...sale, inventoryId: invId, serialNumber: inv.serialNumber||sale.serialNumber||''};
   // Mark inventory as reserved
   const iidx = DB.inventory.findIndex(i => i.id === invId);
-  if (iidx !== -1) DB.inventory[iidx] = {...inv, status: 'reserved'};
+  if (iidx !== -1) DB.inventory[iidx] = {...inv, status: 'reserved', updatedAt: new Date().toISOString()};
   // Update linked fulfillment
   const fulIdx = (DB.fulfillment||[]).findIndex(f => f.saleId === saleId);
-  if (fulIdx !== -1) DB.fulfillment[fulIdx] = {...DB.fulfillment[fulIdx], inventoryId: invId, serialNumber: inv.serialNumber||sale.serialNumber||'', machineName: inv.machineName||sale.machineName};
+  if (fulIdx !== -1) DB.fulfillment[fulIdx] = {...DB.fulfillment[fulIdx], inventoryId: invId, serialNumber: inv.serialNumber||sale.serialNumber||'', machineName: inv.machineName||sale.machineName, updatedAt: new Date().toISOString()};
   saveDB();
   document.getElementById('assign-serial-modal')?.remove();
   showToast(`✅ ${inv.machineName} (SN: ${inv.serialNumber||'—'}) assigned to ${sale.customerName||'sale'}`);
@@ -1637,10 +1644,10 @@ function confirmAssignManual(saleId) {
   if (sidx !== -1) DB.sales[sidx] = {...sale, serialNumber: serial, inventoryId: inv ? inv.id : sale.inventoryId};
   if (inv) {
     const iidx = DB.inventory.findIndex(i => i.id === inv.id);
-    if (iidx !== -1) DB.inventory[iidx] = {...inv, status: 'reserved'};
+    if (iidx !== -1) DB.inventory[iidx] = {...inv, status: 'reserved', updatedAt: new Date().toISOString()};
   }
   const fulIdx = (DB.fulfillment||[]).findIndex(f => f.saleId === saleId);
-  if (fulIdx !== -1) DB.fulfillment[fulIdx] = {...DB.fulfillment[fulIdx], serialNumber: serial, inventoryId: inv ? inv.id : DB.fulfillment[fulIdx].inventoryId};
+  if (fulIdx !== -1) DB.fulfillment[fulIdx] = {...DB.fulfillment[fulIdx], serialNumber: serial, inventoryId: inv ? inv.id : DB.fulfillment[fulIdx].inventoryId, updatedAt: new Date().toISOString()};
   saveDB();
   document.getElementById('assign-serial-modal')?.remove();
   showToast(`✅ Serial ${serial} assigned${inv?' and linked to inventory':''}`);
@@ -2069,7 +2076,7 @@ function submitSale(e) {
     } else if (invItem && invItem.status === 'reserved') {
       if (!confirm(`⚠️ "${invItem.machineName}" is already RESERVED for another sale.\n\nContinue? (will re-reserve for this sale)`)) { _submitting = false; return; }
     }
-    if (invItem) { const idx = DB.inventory.findIndex(i => i.id === invItem.id); if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'reserved'}; }
+    if (invItem) { const idx = DB.inventory.findIndex(i => i.id === invItem.id); if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'reserved', updatedAt: new Date().toISOString()}; }
     r.inventoryId = inventoryId;
     if (!DB.sales) DB.sales = [];
     DB.sales.unshift({id: newId, createdAt: today(), inventoryId, ...r});
@@ -2964,7 +2971,7 @@ function convertShopifyOrder(oi) {
   // Mark inventory reserved
   if (invItem) {
     const idx = DB.inventory.findIndex(i => i.id === invItem.id);
-    if (idx !== -1 && DB.inventory[idx].status !== 'sold') DB.inventory[idx] = {...DB.inventory[idx], status: 'reserved'};
+    if (idx !== -1 && DB.inventory[idx].status !== 'sold') DB.inventory[idx] = {...DB.inventory[idx], status: 'reserved', updatedAt: new Date().toISOString()};
   }
   // Deduct parts
   applyPartsDeduction(saleRecord.salePartsLines, newSaleId, '');
@@ -4242,8 +4249,13 @@ function wcSubmit(e) {
     linkedSaleId:  f.linkedSaleId ? f.linkedSaleId.value : '',
   };
   // Save customer info if present
-  if (r.customerName) upsertCustomer(r);
-  saveDB('customers');
+  if (r.customerName) {
+    upsertCustomer(r);
+    // Save the upserted customer record specifically
+    const _custKey = r.customerName.trim().toLowerCase();
+    const _custRec = (DB.customers||[]).find(c => (c.customerName||'').trim().toLowerCase() === _custKey);
+    if (_custRec && _custRec.id) saveDB('customers', _custRec.id);
+  }
   if (wcEditing && wcEditing.id) {
     const wcId = wcEditing.id;
     wcEditing = null;
