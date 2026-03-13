@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.03'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.04'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -367,7 +367,11 @@ function _startRealTimeWatch() {
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
-      if (Date.now() - _lastSaveTime < 5000) return; // skip echo of our own save
+      // Block overwrite if we saved recently OR if there are still pending saves in the queue
+      const hasPendingForCol = Object.keys(_saveQueue).some(k => k.startsWith(c + '::'));
+      if (Date.now() - _lastSaveTime < 8000) return; // extended guard window
+      if (hasPendingForCol) return; // don't let Firestore echo stomp unsaved local changes
+      if (_saveTimer) return; // save debounce still ticking
       const anyInputFocused = document.activeElement &&
         ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
       if (anyInputFocused) return;
