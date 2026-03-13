@@ -2922,7 +2922,7 @@ function convertShopifyToPreOrder(oi) {
     DB.pendingSales.unshift({
       id: uid(), createdAt: today(),
       category,
-      gameName: item.rawName || '',
+      gameName: category,
       customerName: order.customerName || '',
       customerEmail: order.customerEmail || '',
       customerPhone: order.customerPhone || '',
