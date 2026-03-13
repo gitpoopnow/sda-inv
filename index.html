@@ -2687,7 +2687,7 @@ function renderShopifyOrderCard(order, oi) {
   const statusColors = {pending:'var(--yellow)', converted:'var(--green)', skipped:'var(--muted)'};
   const statusLabels = {pending:'⏳ Pending', converted:'✅ Converted', skipped:'⏭️ Skipped'};
   const st = order._status || 'pending';
-  const psCategories = [...new Set((DB.pendingSales||[]).map(p => p.category).filter(Boolean))];
+  const psCategories = [...new Set((DB.pendingSales||[]).map(p => (p.category||p.gameName||'').trim()).filter(Boolean))].sort();
   const catOptions = psCategories.length
     ? psCategories.map(c => `<option value="${c}">${c}</option>`).join('')
     : '<option value="">No categories yet</option>';
