@@ -204,7 +204,7 @@ h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;lette
     <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
     <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
     <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-    <div class="dd" id="ddate"></div>
+    <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
   </header>
   <main id="mc"></main>
 </div>
@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v2026.03.13-1000'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.00'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -3131,7 +3131,7 @@ async function fetchShopifyFromGmail() {
 function render() {
   try {
     const sfEl = document.getElementById('sf'); if (sfEl) sfEl.textContent = `${(DB.inventory||[]).length} games · ${(DB.pendingSales||[]).filter(p=>p.paymentStatus!=='PIF').length} pending`;
-    const ddEl = document.getElementById('ddate'); if (ddEl) ddEl.textContent = new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    const ddEl = document.getElementById('ddate'); if (ddEl) { const dateStr = new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); const verEl = document.getElementById('ver-inline'); if (!verEl) { ddEl.innerHTML = `<span>${dateStr}</span><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span>`; } else { const dateSpan = ddEl.querySelector('span:not(#ver-inline)'); if (dateSpan) dateSpan.textContent = dateStr; else ddEl.insertAdjacentHTML('afterbegin', `<span>${dateStr}</span>`); } }
     const mc = document.getElementById('mc'); if (!mc) return;
     mc.innerHTML = ({
       dashboard: renderDashboard,
@@ -4844,11 +4844,10 @@ async function _startApp(user) {
         <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
         <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
         <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-        <div class="dd" id="ddate"></div>
+        <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
       </header>
       <main id="mc"></main>
-    </div>
-    <div id="ver-bar" style="position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);text-align:center;padding:3px 0;font-size:10px;font-weight:700;color:rgba(255,255,255,.35);letter-spacing:.08em;pointer-events:none;z-index:9999">SDA PINBALL INVENTORY &nbsp;·&nbsp; ${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</div>`;
+    </div>`;
     _delegatedListenersReady = false; // reset so listeners rebind on new DOM
   }
   const userEmailEl = document.getElementById('user-email');
