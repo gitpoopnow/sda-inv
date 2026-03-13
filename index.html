@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v2026.03.12-1730'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2026.03.13-1000'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -840,22 +840,31 @@ function renderInventory() {
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${invEditing?'✏️ Edit':'➕ Add'} Inventory</h3>
     <form onsubmit="submitInv(event)">
+      ${!invEditing ? `
+      <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:9px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.05em">📦 BULK ADD</span>
+          <span style="font-size:11px;color:var(--muted)">How many units?</span>
+          <input id="bulk-qty" type="number" name="bulkQty" min="1" max="500" value="1" style="width:72px;text-align:center;font-size:15px;font-weight:800;padding:5px 8px" oninput="updateBulkHint()">
+        </div>
+        <div id="bulk-hint" style="font-size:11px;color:var(--muted);font-style:italic"></div>
+      </div>` : ''}
       <div class="grid">
         <div class="fw"><label class="fl">MACHINE NAME</label><input name="machineName" value="${rec.machineName||''}" required placeholder="e.g. Jaws Premium"></div>
-        <div class="fw"><label class="fl">SERIAL NUMBER</label><input name="serialNumber" value="${rec.serialNumber||''}"></div>
+        ${invEditing ? `<div class="fw"><label class="fl">SERIAL NUMBER</label><input name="serialNumber" value="${rec.serialNumber||''}"></div>` : `<div class="fw"><label class="fl">SERIAL NUMBER <span style="color:var(--muted);font-weight:400;font-size:10px">(optional — add later)</span></label><input name="serialNumber" value="" placeholder="Leave blank for bulk add"></div>`}
         <div class="fw"><label class="fl">LOCATION</label><select name="section"><option value="">—</option>${['BAR','NEW SHOWROOM','WAREHOUSE/CONTAINER','CONTAINER','FRONT OFFICE','BDK'].map(s=>`<option${rec.section===s?' selected':''}>${s}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">CONDITION</label><select name="condition">${['New','Used','Project'].map(o=>`<option${(rec.condition||'New')===o?' selected':''}>${o}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">DATE REC'D</label><input type="date" name="dateReceived" value="${rec.dateReceived||''}"></div>
         <div class="fw"><label class="fl">DATE SOLD</label><input type="date" name="dateSold" value="${rec.dateSold||''}"></div>
         <div class="fw"><label class="fl">COST ($)</label><input type="number" step="0.01" name="cost" value="${rec.cost||''}"></div>
-        <div class="fw"><label class="fl">SHELF / SPOT</label><input name="location" value="${rec.location||''}" placeholder="BAR-1, B-T1-3, BDK…"></div>
+        ${invEditing ? `<div class="fw"><label class="fl">SHELF / SPOT</label><input name="location" value="${rec.location||''}" placeholder="BAR-1, B-T1-3, BDK…"></div>` : `<div class="fw"><label class="fl">SHELF / SPOT <span style="color:var(--muted);font-weight:400;font-size:10px">(optional — add later)</span></label><input name="location" value="" placeholder="Leave blank for bulk add"></div>`}
         <div class="fw"><label class="fl">STATUS</label><select name="status">${['in_stock','sold','on_location','reserved','pre_order'].map(s=>`<option${(rec.status||'in_stock')===s?' selected':''}>${s}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">PAYMENT STATUS</label><input name="paymentStatus" list="dl-pay-inv" value="${rec.paymentStatus||''}" placeholder="PIF, ACH, CASH…"></div>
       </div>
       <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${rec.notes||''}</textarea></div>
       <div class="br">
-        <button class="btn" type="submit">${invEditing?'Save Changes':'Add to Inventory'}</button>
-        ${invEditing?`<button class="btn ghost" type="button" onclick="invEditing=null;render()">Cancel</button>`:`<button class="btn ghost" type="button" onclick="this.closest('form').reset();this.closest('form').querySelectorAll('select').forEach(s=>s.selectedIndex=0)" style="opacity:.7">Clear</button>`}
+        <button class="btn" type="submit" id="inv-submit-btn">${invEditing?'Save Changes':'Add to Inventory'}</button>
+        ${invEditing?`<button class="btn ghost" type="button" onclick="invEditing=null;render()">Cancel</button>`:`<button class="btn ghost" type="button" onclick="this.closest('form').reset();this.closest('form').querySelectorAll('select').forEach(s=>s.selectedIndex=0);document.getElementById('bulk-qty').value=1;updateBulkHint()" style="opacity:.7">Clear</button>`}
       </div>
     </form>
   </div>
@@ -881,6 +890,22 @@ function renderInventory() {
     </tbody>
   </table></div><div class="pg" id="inv-pg">${pgHtml(pg.page,pg.pages,pg.total,'p=>{invPage=p;renderInvTable()}').replace(/^<div[^>]*>/, '').replace(/<\/div>$/, '')}</div></div>`;
 }
+function updateBulkHint() {
+  const qtyEl = document.getElementById('bulk-qty');
+  const hintEl = document.getElementById('bulk-hint');
+  const btnEl  = document.getElementById('inv-submit-btn');
+  if (!qtyEl || !hintEl) return;
+  const qty = parseInt(qtyEl.value) || 1;
+  if (qty > 1) {
+    hintEl.textContent = `Will add ${qty} separate records — serial number & shelf/spot can be filled in later via Edit on each row.`;
+    hintEl.style.color = 'var(--accent)';
+    if (btnEl) btnEl.textContent = `Add ${qty} to Inventory`;
+  } else {
+    hintEl.textContent = '';
+    if (btnEl) btnEl.textContent = 'Add to Inventory';
+  }
+}
+
 function submitInv(e) {
   e.preventDefault();
   const r=Object.fromEntries(new FormData(e.target));
@@ -918,7 +943,39 @@ function submitInv(e) {
     }
     invEditing=null;
     updateRow('inventory',invId,r);
-  } else addRow('inventory',r);
+  } else {
+    // ── BULK ADD ──────────────────────────────────────────────
+    const qty = Math.min(Math.max(parseInt(r.bulkQty)||1, 1), 500);
+    delete r.bulkQty;
+    if (qty === 1) {
+      addRow('inventory', r);
+    } else {
+      // Add qty records; serial number and location intentionally left blank per-unit
+      const baseName    = r.machineName;
+      const baseSerial  = r.serialNumber || '';
+      const baseLocation= r.location     || '';
+      for (let i = 0; i < qty; i++) {
+        const rec = {
+          ...r,
+          machineName:  baseName,
+          serialNumber: baseSerial,   // user will fill in later
+          location:     baseLocation, // user will fill in later
+        };
+        const newRec = {id:uid(), createdAt:today(), updatedAt:new Date().toISOString(), ...rec};
+        DB['inventory'].unshift(newRec);
+        // Save each to Firestore async (don't await to keep it fast)
+        window._fbSaveRecord && window._fbSaveRecord('inventory', newRec);
+      }
+      saveLocal();
+      render();
+      // Brief toast
+      const toast = document.createElement('div');
+      toast.textContent = `✅ Added ${qty}× ${baseName} to inventory`;
+      toast.style.cssText = 'position:fixed;bottom:36px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;font-weight:700;font-size:13px;padding:10px 22px;border-radius:10px;z-index:99999;box-shadow:0 4px 18px rgba(0,0,0,.5);pointer-events:none';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+  }
 }
 function renderInvTable() {
   let rows = DB.inventory;
