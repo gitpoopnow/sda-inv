@@ -86,9 +86,10 @@ window._fbSeedCollection = async (col, records) => {
 // Watch a single collection for real-time changes
 window._fbWatchCollection = (col, cb) => {
   if (!_db) return () => {};
-  return _db.collection(col).onSnapshot(snap => {
-    cb(col, snap.docs.map(d => d.data()));
-  });
+  return _db.collection(col).onSnapshot(
+    snap => cb(col, snap.docs.map(d => d.data())),
+    err => console.warn('[SDA] Firestore listener error:', col, err.code)
+  );
 };
 
 window._fbSignIn   = () => _auth.signInWithPopup(_provider);
@@ -214,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v2026.03.12-1645'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2026.03.12-1730'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -314,7 +315,7 @@ async function loadDB() {
       // Load everything from Firestore
       const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
       cols.forEach(col => {
-        if (remote[col] && remote[col].length > 0) DB[col] = remote[col];
+        if (remote[col] !== undefined) DB[col] = remote[col]; // remote is source of truth even if empty
       });
     }
 
@@ -332,13 +333,34 @@ async function loadDB() {
   }
 }
 
+// ── Cross-tab sync via BroadcastChannel ──────────────────────
+// When this tab saves to Firestore, broadcast to other open tabs so they
+// reload from localStorage immediately without waiting for onSnapshot
+let _syncChannel = null;
+try {
+  _syncChannel = new BroadcastChannel('sda_sync');
+  _syncChannel.onmessage = (e) => {
+    if (e.data === 'reload' && Date.now() - _lastSaveTime > 2000) {
+      loadLocal();
+      ensureTables();
+      render();
+      _updateLastSyncLabel();
+      console.log('[SDA] Cross-tab sync received');
+    }
+  };
+} catch(e) { /* BroadcastChannel not supported */ }
+
+function _notifyOtherTabs() {
+  try { if (_syncChannel) _syncChannel.postMessage('reload'); } catch(e) {}
+}
+
 // ── REAL-TIME LISTENERS (per collection) ──────────────────────
 function _startRealTimeWatch() {
-  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold'];
+  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
-      if (Date.now() - _lastSaveTime < 3000) return; // skip if we just saved
+      if (Date.now() - _lastSaveTime < 5000) return; // skip echo of our own save
       const anyInputFocused = document.activeElement &&
         ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
       if (anyInputFocused) return;
@@ -347,6 +369,7 @@ function _startRealTimeWatch() {
       saveLocal();
       render();
       _updateLastSyncLabel();
+      _notifyOtherTabs();
     });
   });
 }
@@ -385,6 +408,7 @@ async function pushToDB() {
     await Promise.all(items.map(({ col, record }) => window._fbSaveRecord(col, record)));
     setSyncStatus('saved', '✓ Live');
     _updateLastSyncLabel();
+    _notifyOtherTabs();
     setTimeout(() => setSyncStatus('idle'), 3000);
   } catch(e) {
     console.warn('[SDA] Firestore save error:', e);
@@ -4701,7 +4725,7 @@ async function forceSyncNow() {
   try {
     const remote = await window._fbLoadAll();
     DB_COLLECTIONS.forEach(col => {
-      if (remote[col] && remote[col].length > 0) DB[col] = remote[col];
+      if (remote[col] !== undefined) DB[col] = remote[col]; // remote is source of truth even if empty
     });
     ensureTables();
     saveLocal();
