@@ -319,10 +319,11 @@ async function loadDB() {
       await window._fbSeedCollection('_meta', [{id:'version', seedVersion: SEED_VERSION}]);
       // DB already has seed data
     } else {
-      // Load everything from Firestore
+      // Load everything from Firestore — always prefer remote over local cache
       const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
       cols.forEach(col => {
-        if (remote[col] && remote[col].length > 0) DB[col] = remote[col];
+        // Use remote data even if empty array — remote is source of truth
+        if (remote[col] !== undefined) DB[col] = remote[col];
       });
     }
 
@@ -372,7 +373,7 @@ function _startRealTimeWatch() {
     console.log('[SDA] DEV_MODE: real-time listeners disabled. Use 🔄 Sync to refresh.');
     return;
   }
-  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold'];
+  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
@@ -4331,8 +4332,9 @@ async function forceSyncNow() {
   setSyncStatus('loading', '⟳ Syncing…');
   try {
     const remote = await window._fbLoadAll();
+    // Always use Firestore as source of truth — overwrite local for all collections
     DB_COLLECTIONS.forEach(col => {
-      if (remote[col] && remote[col].length > 0) DB[col] = remote[col];
+      if (remote[col] !== undefined) DB[col] = remote[col];
     });
     ensureTables();
     saveLocal();
