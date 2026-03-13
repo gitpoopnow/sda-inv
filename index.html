@@ -87,24 +87,10 @@ window._fbSeedCollection = async (col, records) => {
 // Throttled: callbacks are coalesced — at most one render per 5 seconds per collection
 window._fbWatchCollection = (col, cb) => {
   if (!_db) return () => {};
-  let _throttleTimer = null;
-  let _pendingSnap = null;
-  const unsub = _db.collection(col).onSnapshot(snap => {
-    _pendingSnap = snap;
-    if (_throttleTimer) return;
-    _throttleTimer = setTimeout(() => {
-      _throttleTimer = null;
-      if (_pendingSnap) cb(col, _pendingSnap.docs.map(d => d.data()));
-      _pendingSnap = null;
-    }, 15000); // 15-second throttle per collection
-  }, err => {
-    // Quota exceeded or auth error — unsubscribe to stop burning quota
-    if (err.code === 'resource-exhausted') {
-      console.warn('[SDA] Firestore quota exceeded — pausing real-time listeners. Data will still save. Reload tomorrow or upgrade to Blaze plan.');
-      unsub && unsub();
-    }
-  });
-  return unsub;
+  return _db.collection(col).onSnapshot(
+    snap => cb(col, snap.docs.map(d => d.data())),
+    err => console.warn('[SDA] Firestore listener error:', col, err.code)
+  );
 };
 
 window._fbSignIn   = () => _auth.signInWithPopup(_provider);
