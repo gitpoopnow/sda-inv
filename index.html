@@ -84,10 +84,19 @@ window._fbSeedCollection = async (col, records) => {
 };
 
 // Watch a single collection for real-time changes
+// Throttled: callbacks are coalesced — at most one render per 5 seconds per collection
 window._fbWatchCollection = (col, cb) => {
   if (!_db) return () => {};
+  let _throttleTimer = null;
+  let _pendingSnap = null;
   return _db.collection(col).onSnapshot(snap => {
-    cb(col, snap.docs.map(d => d.data()));
+    _pendingSnap = snap;
+    if (_throttleTimer) return; // already waiting, just update pendingSnap
+    _throttleTimer = setTimeout(() => {
+      _throttleTimer = null;
+      if (_pendingSnap) cb(col, _pendingSnap.docs.map(d => d.data()));
+      _pendingSnap = null;
+    }, 5000); // 5-second throttle per collection
   });
 };
 
@@ -214,7 +223,6 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v2026.03.12-1645'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -333,20 +341,51 @@ async function loadDB() {
 }
 
 // ── REAL-TIME LISTENERS (per collection) ──────────────────────
+// Real-time Firestore listeners — throttled to max 1 update per 5s per collection
+// Cross-tab sync via BroadcastChannel: saves on one tab notify other tabs instantly
+const DEV_MODE = false;
+
+// ── Cross-tab sync via BroadcastChannel ──────────────────────
+// When this tab saves to Firestore, broadcast to other tabs on same device
+// so they reload from localStorage immediately without waiting for onSnapshot
+let _syncChannel = null;
+try {
+  _syncChannel = new BroadcastChannel('sda_sync');
+  _syncChannel.onmessage = (e) => {
+    if (e.data === 'reload' && Date.now() - _lastSaveTime > 2000) {
+      // Another tab saved — reload local data and re-render
+      loadLocal();
+      ensureTables();
+      render();
+      _updateLastSyncLabel();
+      console.log('[SDA] Cross-tab sync received');
+    }
+  };
+} catch(e) { /* BroadcastChannel not supported */ }
+
+function _notifyOtherTabs() {
+  try { if (_syncChannel) _syncChannel.postMessage('reload'); } catch(e) {}
+}
+
 function _startRealTimeWatch() {
+  if (DEV_MODE) {
+    console.log('[SDA] DEV_MODE: real-time listeners disabled. Use 🔄 Sync to refresh.');
+    return;
+  }
   const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold'];
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
-      if (Date.now() - _lastSaveTime < 3000) return; // skip if we just saved
+      if (Date.now() - _lastSaveTime < 5000) return; // skip echo of our own save
       const anyInputFocused = document.activeElement &&
         ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
-      if (anyInputFocused) return;
+      if (anyInputFocused) return; // don't yank focus while user is typing
       DB[c] = records;
       ensureTables();
       saveLocal();
       render();
       _updateLastSyncLabel();
+      _notifyOtherTabs();
     });
   });
 }
@@ -385,6 +424,7 @@ async function pushToDB() {
     await Promise.all(items.map(({ col, record }) => window._fbSaveRecord(col, record)));
     setSyncStatus('saved', '✓ Live');
     _updateLastSyncLabel();
+    _notifyOtherTabs(); // tell other tabs on this device to reload
     setTimeout(() => setSyncStatus('idle'), 3000);
   } catch(e) {
     console.warn('[SDA] Firestore save error:', e);
@@ -564,9 +604,6 @@ function goto(s, preset) {
 
 // ── PAGINATION ────────────────────────────────────────────────
 let invPage=0, salePage=0, partsPage=0;
-let fulTab = 'pending';
-let svcEditing = null;
-let svcTab = 'pending';
 const PER = 9999;
 function paginate(rows, page) {
   const total = rows.length;
@@ -741,7 +778,7 @@ function badge(v, map) {
   const cls = map[v] || 'bg-blue';
   return `<span class="badge ${cls}">${v||'—'}</span>`;
 }
-const statusBadge = {in_stock:'bg-green',sold:'bg-red',on_location:'bg-purple',reserved:'bg-yellow',pre_order:'bg-orange',pending:'bg-yellow',closed:'bg-green',open:'bg-blue',delivered:'bg-green',cancelled:'bg-red'};
+const statusBadge = {in_stock:'bg-green',sold:'bg-red',on_location:'bg-purple',reserved:'bg-yellow',pending:'bg-yellow',closed:'bg-green',open:'bg-blue',delivered:'bg-green',cancelled:'bg-red'};
 
 // ── DASHBOARD ─────────────────────────────────────────────────
 function renderDashboard() {
@@ -786,32 +823,21 @@ let invFilters = {search:'',section:'',status:''};
 function renderInventory() {
   const rec = invEditing||{};
   let rows = DB.inventory;
-  const invTab = invFilters.invTab || 'in_stock';
-  if(invTab === '_active') rows = rows.filter(r => r.status !== 'sold');
-  else if(invTab === 'sold') rows = rows.filter(r => r.status === 'sold');
-  else rows = rows.filter(r => r.status === invTab);
   if(invFilters.search) { const t=invFilters.search.toLowerCase(); rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t)); }
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
+  if(invFilters.status) rows=rows.filter(r=>r.status===invFilters.status);
   const pg = paginate(rows, invPage);
   const sections = [...new Set(DB.inventory.map(r=>r.section).filter(Boolean))];
   return `
   <h1 class="pt">Inventory</h1>
-  <div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid var(--border)">
-    ${[
-      {id:'inv-tab-in_stock',  label:'📦 In Stock',    status:'in_stock',   color:'var(--green)',  count:DB.inventory.filter(r=>r.status==='in_stock').length},
-      {id:'inv-tab-on_location',label:'📍 On Location',status:'on_location',color:'var(--purple)', count:DB.inventory.filter(r=>r.status==='on_location').length},
-      {id:'inv-tab-reserved',  label:'🔒 Reserved',    status:'reserved',   color:'var(--yellow)', count:DB.inventory.filter(r=>r.status==='reserved').length},
-      {id:'inv-tab-pre_order', label:'🛒 Pre-Order',   status:'pre_order',  color:'var(--orange)', count:DB.inventory.filter(r=>r.status==='pre_order').length},
-      {id:'inv-tab-all_active',label:'📋 All Active',  status:'_active',    color:'var(--accent)', count:DB.inventory.filter(r=>r.status!=='sold').length},
-      {id:'inv-tab-sold',      label:'✅ Sold',         status:'sold',       color:'var(--red)',    count:DB.inventory.filter(r=>r.status==='sold').length},
-    ].map(t=>{
-      const active = invFilters.invTab===t.status || (!invFilters.invTab && t.status==='in_stock');
-      return `<button id="${t.id}" onclick="invFilters.invTab='${t.status}';invFilters.status=${t.status==='_active'?`''`:`'${t.status}'`};invPage=0;renderInvTable()" style="padding:8px 16px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'}">${t.label} (${t.count})</button>`;
-    }).join('')}
+  <div style="display:flex;gap:0;margin-bottom:14px;border-bottom:2px solid var(--border)">
+    <button id="inv-tab-active" onclick="invFilters.invTab='active';invFilters.status='';invPage=0;document.getElementById('inv-tab-active').style.background='var(--accent)';document.getElementById('inv-tab-active').style.color='#fff';document.getElementById('inv-tab-sold').style.background='var(--panel2)';document.getElementById('inv-tab-sold').style.color='var(--muted)';document.getElementById('inv-status-filter').style.display='';renderInvTable()" style="padding:8px 22px;font-size:13px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${(!invFilters.invTab||invFilters.invTab==='active')?'var(--accent)':'var(--panel2)'};color:${(!invFilters.invTab||invFilters.invTab==='active')?'#fff':'var(--muted)'}">📦 Active (${DB.inventory.filter(r=>r.status!=='sold').length})</button>
+    <button id="inv-tab-sold" onclick="invFilters.invTab='sold';invFilters.status='sold';invPage=0;document.getElementById('inv-tab-sold').style.background='var(--red)';document.getElementById('inv-tab-sold').style.color='#fff';document.getElementById('inv-tab-active').style.background='var(--panel2)';document.getElementById('inv-tab-active').style.color='var(--muted)';document.getElementById('inv-status-filter').style.display='none';renderInvTable()" style="padding:8px 22px;font-size:13px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;transition:background .15s;background:${invFilters.invTab==='sold'?'var(--red)':'var(--panel2)'};color:${invFilters.invTab==='sold'?'#fff':'var(--muted)'}">✅ Sold (${DB.inventory.filter(r=>r.status==='sold').length})</button>
   </div>
   <div class="filters">
     <input id="inv-search-input" placeholder="🔍 Search name, serial, location…" value="${invFilters.search}">
     <select onchange="invFilters.section=this.value;invPage=0;renderInvTable()"><option value="">All Locations</option>${sections.map(s=>`<option${invFilters.section===s?' selected':''}>${s}</option>`).join('')}</select>
+    ${(!invFilters.invTab||invFilters.invTab==='active')?`<select id="inv-status-filter" onchange="invFilters.status=this.value;invPage=0;renderInvTable()"><option value="">All Status</option>${['in_stock','on_location','reserved'].map(s=>`<option${invFilters.status===s?' selected':''}>${s}</option>`).join('')}</select>`:`<select id="inv-status-filter" style="display:none" onchange="invFilters.status=this.value;invPage=0;renderInvTable()"><option value="">All Status</option>${['in_stock','on_location','reserved'].map(s=>`<option${invFilters.status===s?' selected':''}>${s}</option>`).join('')}</select>`}
   </div>
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${invEditing?'✏️ Edit':'➕ Add'} Inventory</h3>
@@ -825,7 +851,7 @@ function renderInventory() {
         <div class="fw"><label class="fl">DATE SOLD</label><input type="date" name="dateSold" value="${rec.dateSold||''}"></div>
         <div class="fw"><label class="fl">COST ($)</label><input type="number" step="0.01" name="cost" value="${rec.cost||''}"></div>
         <div class="fw"><label class="fl">SHELF / SPOT</label><input name="location" value="${rec.location||''}" placeholder="BAR-1, B-T1-3, BDK…"></div>
-        <div class="fw"><label class="fl">STATUS</label><select name="status">${['in_stock','sold','on_location','reserved','pre_order'].map(s=>`<option${(rec.status||'in_stock')===s?' selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="fw"><label class="fl">STATUS</label><select name="status">${['in_stock','sold','on_location','reserved'].map(s=>`<option${(rec.status||'in_stock')===s?' selected':''}>${s}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">PAYMENT STATUS</label><input name="paymentStatus" list="dl-pay-inv" value="${rec.paymentStatus||''}" placeholder="PIF, ACH, CASH…"></div>
       </div>
       <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${rec.notes||''}</textarea></div>
@@ -898,13 +924,13 @@ function submitInv(e) {
 }
 function renderInvTable() {
   let rows = DB.inventory;
-  // Tab filtering: status tabs filter directly; _active = all non-sold; sold = only sold; default = in_stock
-  const tab = invFilters.invTab || 'in_stock';
-  if(tab === '_active') rows = rows.filter(r => r.status !== 'sold');
+  // Tab filtering: Active = everything except sold; Sold = only sold; default = Active
+  const tab = invFilters.invTab || 'active';
+  if(tab === 'active') rows = rows.filter(r => r.status !== 'sold');
   else if(tab === 'sold') rows = rows.filter(r => r.status === 'sold');
-  else rows = rows.filter(r => r.status === tab);
   if(invFilters.search){const t=invFilters.search.toLowerCase();rows=rows.filter(r=>(r.machineName||'').toLowerCase().includes(t)||(r.serialNumber||'').toLowerCase().includes(t)||(r.location||'').toLowerCase().includes(t)||(r.notes||'').toLowerCase().includes(t));}
   if(invFilters.section) rows=rows.filter(r=>r.section===invFilters.section);
+  if(invFilters.status && tab==='active') rows=rows.filter(r=>r.status===invFilters.status);
   const pg=paginate(rows,invPage);
   const tbody=document.getElementById('inv-tbody');
   if(tbody) tbody.innerHTML=pg.rows.map(r=>`<tr>
@@ -2341,7 +2367,7 @@ function renderPendingSales() {
     const moveOpts = otherGames.map(g => `<option value="${g.replace(/"/g,'&quot;')}">${g}</option>`).join('');
 
     const custRows = customers.map(r => {
-      const infoLine = [r.customerState||r.state, r.model, r.shopifyOrderNum ? `Shopify ${r.shopifyOrderNum}` : '', r.invNumber ? `INV# ${r.invNumber}` : ''].filter(Boolean).join(' · ');
+      const infoLine = [r.customerState||r.state, r.model, r.invNumber ? `INV# ${r.invNumber}` : ''].filter(Boolean).join(' · ');
       const noteLine = [r.paymentNotes, r.notes].filter(Boolean).join(' — ');
       return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1;min-width:0">
@@ -2404,7 +2430,6 @@ function renderPendingSales() {
         <div class="fw"><label class="fl">ZIP / POSTAL</label><input name="customerZip" id="ps-addr-zip" value="${_a.zip}" placeholder="92101" style="max-width:130px"></div>`; })()}
       </div>
       <div class="grid">
-        <div class="fw"><label class="fl">SHOPIFY ORDER #</label><input name="shopifyOrderNum" value="${rec.shopifyOrderNum||''}" placeholder="#1587"></div>
         <div class="fw"><label class="fl">INV #</label><input name="invNumber" value="${rec.invNumber||''}" placeholder="#1500"></div>
         <div class="fw"><label class="fl">PRICE ($)</label><input type="number" step="0.01" name="price" value="${rec.price||''}"></div>
         <div class="fw"><label class="fl">DEPOSIT ($)</label><input type="number" step="0.01" name="depositAmount" value="${rec.depositAmount||''}"></div>
@@ -2689,7 +2714,7 @@ function renderShopifyOrderCard(order, oi) {
   const statusColors = {pending:'var(--yellow)', converted:'var(--green)', skipped:'var(--muted)'};
   const statusLabels = {pending:'⏳ Pending', converted:'✅ Converted', skipped:'⏭️ Skipped'};
   const st = order._status || 'pending';
-  const psCategories = [...new Set((DB.pendingSales||[]).map(p => (p.category||p.gameName||'').trim()).filter(Boolean))].sort();
+  const psCategories = [...new Set((DB.pendingSales||[]).map(p => p.category).filter(Boolean))];
   const catOptions = psCategories.length
     ? psCategories.map(c => `<option value="${c}">${c}</option>`).join('')
     : '<option value="">No categories yet</option>';
@@ -2924,7 +2949,7 @@ function convertShopifyToPreOrder(oi) {
     DB.pendingSales.unshift({
       id: uid(), createdAt: today(),
       category,
-      gameName: category,
+      gameName: item.rawName || '',
       customerName: order.customerName || '',
       customerEmail: order.customerEmail || '',
       customerPhone: order.customerPhone || '',
@@ -2950,18 +2975,7 @@ function convertShopifyToPreOrder(oi) {
     customerZip: order.customerZip,
   });
 
-  // Remove from the visible list immediately
-  shopifyOrders.splice(oi, 1);
-
-  // Permanently dismiss so it never re-appears after a Gmail re-fetch
-  if (order.shopifyOrderNum) {
-    shopifyDismissed.add(order.shopifyOrderNum);
-    if (!DB.shopifyDismissed) DB.shopifyDismissed = [];
-    if (!DB.shopifyDismissed.includes(order.shopifyOrderNum)) {
-      DB.shopifyDismissed.push(order.shopifyOrderNum);
-    }
-  }
-
+  shopifyOrders[oi]._status = 'converted';
   saveDB();
   showToast(`✅ Order ${order.shopifyOrderNum||''} added to Pre-Orders → ${category}!`);
   render();
@@ -2979,10 +2993,11 @@ async function fetchShopifyFromGmail() {
     const response = await fetch(`${SYNC_URL}?key=${encodeURIComponent(SYNC_KEY)}&action=getOrders`, {method:'GET'});
     if (!response.ok) { showToast('❌ Server error ' + response.status + '. Check Apps Script deployment.', 'error'); return; }
     const json = await response.json();
+    console.log('Apps Script raw response:', JSON.stringify(json).slice(0, 300));
     // Accept both plain array (old script) and {ok:true, orders:[]} (new script)
     const rawOrders = Array.isArray(json) ? json : (json && Array.isArray(json.orders) ? json.orders : null);
     if (!rawOrders) { showToast('❌ Unexpected response from Apps Script: ' + JSON.stringify(json).slice(0,120), 'error'); return; }
-    if (!rawOrders.length) { showToast('No new Shopify orders found in Gmail.', 'info'); return; }
+    if (!rawOrders.length) { showToast('No new Shopify orders found in Gmail. (0 orders with status=new in sheet)', 'info'); return; }
     // Convert Apps Script format to app format
     const orders = rawOrders.map(o => ({
       shopifyOrderNum: '#' + o.orderNumber,
@@ -3061,7 +3076,9 @@ function render() {
       leads: ()=>renderSimple('leads','Leads',
         [{k:'name',l:'NAME',req:1},{k:'email',l:'EMAIL'},{k:'phone',l:'PHONE'},{k:'interestedMachine',l:'INTERESTED IN'},{k:'source',l:'SOURCE'},{k:'status',l:'STATUS',type:'select',opts:['new','contacted','qualified','closed','lost'],def:'new'}],
         [{k:'name',l:'NAME'},{k:'email',l:'EMAIL',m:1},{k:'phone',l:'PHONE',m:1},{k:'interestedMachine',l:'INTERESTED IN'},{k:'source',l:'SOURCE',m:1},{k:'status',l:'STATUS',badge:{new:'bg-blue',contacted:'bg-yellow',qualified:'bg-green',lost:'bg-red'}},{k:'createdAt',l:'DATE',m:1}]),
-      service: ()=>renderServiceCalls(),
+      service: ()=>renderSimple('service','Service Calls',
+        [{k:'customerName',l:'CUSTOMER',req:1},{k:'businessName',l:'BUSINESS NAME'},{k:'machineName',l:'MACHINE'},{k:'issue',l:'ISSUE'},{k:'priority',l:'PRIORITY',type:'select',opts:['normal','high','urgent'],def:'normal'},{k:'status',l:'STATUS',type:'select',opts:['open','in_progress','closed'],def:'open'},{k:'scheduledDate',l:'DATE',type:'date'}],
+        [{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS',m:1},{k:'machineName',l:'MACHINE'},{k:'issue',l:'ISSUE'},{k:'priority',l:'PRI',badge:{normal:'bg-blue',high:'bg-yellow',urgent:'bg-red'}},{k:'status',l:'STATUS',badge:{open:'bg-blue',in_progress:'bg-yellow',closed:'bg-green'}},{k:'scheduledDate',l:'DATE',m:1}]),
       pendingsales: renderPendingSales,
       wantlist: ()=>renderSimple('wantList','Want List',
         [{k:'machineName',l:'MACHINE NAME',req:1},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS NAME'},{k:'customerEmail',l:'EMAIL'},{k:'customerPhone',l:'PHONE'},{k:'maxPrice',l:'MAX PRICE ($)',type:'number'},{k:'invNumber',l:'INV #'},{k:'priority',l:'PRIORITY',type:'select',opts:['low','medium','high'],def:'medium'},{k:'status',l:'STATUS',type:'select',opts:['active','fulfilled','cancelled'],def:'active'}],
@@ -3154,7 +3171,7 @@ const FULFIL_FIELDS = [
   {k:'liftgate',l:'LIFTGATE',type:'datalist',opts:['Yes','No','Yes - Residential','Yes - Business','No - Has Dock']},
   {k:'machineName',l:'MACHINE'},{k:'serialNumber',l:'SERIAL #',type:'serial_picker'},{k:'invNumber',l:'INV #'},
   {k:'method',l:'METHOD',type:'select',opts:['shipping','drop_ship','local_delivery','pickup'],def:'shipping'},
-  {k:'status',l:'STATUS',type:'select',opts:['pending','in_transit','delivered','cancelled'],def:'pending'},
+  {k:'status',l:'STATUS',type:'select',opts:['pending','in_progress','delivered','cancelled'],def:'pending'},
   {k:'carrier',l:'CARRIER',type:'datalist',opts:['XPO Logistics','Forward Air','R+L Carriers','TForce Freight','Estes Express','Dayton Freight','Pitt Ohio','ABF Freight','Roadrunner Freight','Oak Harbor Freight','Daylight Transport','Total Transportation','Sutton Transport','Tax Airfreight','Magnum Logistics','Mountain Valley Express','Dedicated Delivery Professionals','FedEx','USPS','Other']},
   {k:'trackingNumber',l:'TRACKING #'},{k:'trackingLink',l:'TRACKING LINK'},
   {k:'scheduledDate',l:'DATE SHIPPED',type:'date'},
@@ -3181,7 +3198,7 @@ const FULFIL_COLS = [
   {k:'carrier',       l:'CARRIER',    w:'88px',  nowrap:true},
   {k:'trackingNumber',l:'TRACKING',   w:'110px', nowrap:true},
   {k:'scheduledDate', l:'SHIPPED',    w:'84px',  nowrap:true},
-  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_transit:'bg-blue',delivered:'bg-green',cancelled:'bg-red'}},
+  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_progress:'bg-blue',delivered:'bg-green',cancelled:'bg-red'}},
 ];
 
 function buildEmailPreview(rec) {
@@ -3318,13 +3335,7 @@ function renderFulfillment() {
     return `<div class="fw"><label class="fl">${f.l}</label><input type="${f.type||'text'}" name="${f.k}" value="${(rec[f.k]||f.def||'').replace ? (rec[f.k]||'').replace(/"/g,'&quot;') : (rec[f.k]||f.def||'')}" ${f.req?'required':''} oninput="fulfillmentFieldChanged()"></div>`;
   }).join('');
 
-  const allFulfil = DB.fulfillment || [];
-  const filteredFulfil = fulTab === 'all' ? allFulfil : allFulfil.filter(r => {
-    const s = r.status === 'in_progress' ? 'in_transit' : r.status;
-    return s === fulTab;
-  });
-
-  const tableRows = filteredFulfil.map(r => {
+  const tableRows = DB.fulfillment.map(r => {
     const cells = FULFIL_COLS.map(c => {
       let v = r[c.k];
       const style = c.nowrap ? ' style="white-space:nowrap"' : '';
@@ -3345,19 +3356,6 @@ function renderFulfillment() {
     </div></td></tr>`;
   }).join('') || `<tr><td colspan="${FULFIL_COLS.length+1}" class="empty">No records yet.</td></tr>`;
 
-  const fulTabs = [
-    {id:'pending',    label:'⏳ Pending',    color:'var(--yellow)', count:allFulfil.filter(r=>r.status==='pending').length},
-    {id:'in_transit', label:'🚚 In Transit',  color:'var(--accent)', count:allFulfil.filter(r=>r.status==='in_transit').length},
-    {id:'delivered',  label:'✅ Delivered',   color:'var(--green)',  count:allFulfil.filter(r=>r.status==='delivered').length},
-    {id:'all',        label:'📋 All',         color:'var(--muted)',  count:allFulfil.length},
-  ];
-  const fulTabsHtml = `<div style="display:flex;gap:0;margin-bottom:10px;border-bottom:2px solid var(--border)">
-    ${fulTabs.map(t=>{
-      const active = fulTab===t.id;
-      return `<button onclick="fulTab='${t.id}';render()" style="padding:8px 18px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'}">${t.label} (${t.count})</button>`;
-    }).join('')}
-  </div>`;
-
   return `
   <h1 class="pt">Fulfillment</h1>
   <input placeholder="🔍 Search…" oninput="filterTbl('fulfillment-tbody','fulfillment',this.value,${JSON.stringify(FULFIL_FIELDS.map(f=>f.k))})" style="border-radius:9px;padding:8px 14px;margin-bottom:12px">
@@ -3372,7 +3370,6 @@ function renderFulfillment() {
     </form>
   </div>
   ${emailPanel}
-  ${fulTabsHtml}
   <div class="panel" style="padding:10px 8px"><div style="width:100%;overflow-x:auto"><table class="fulfil-tbl" style="width:100%;table-layout:fixed;font-size:11.5px">
     <colgroup>${FULFIL_COLS.map(c=>`<col style="width:${c.w||'80px'}">`).join('')}<col style="width:100px"></colgroup>
     <thead><tr style="font-size:10px;letter-spacing:.04em">${FULFIL_COLS.map(c=>`<th style="white-space:nowrap;padding:6px 6px">${c.l}</th>`).join('')}<th style="text-align:right;padding-right:6px"></th></tr></thead>
@@ -4129,373 +4126,7 @@ function wcSubmit(e) {
   }
 }
 
-// ── SERVICE CALLS MODULE ─────────────────────────────────────────────────────
-
-function svcGenTicket() {
-  const d = new Date();
-  const yy = String(d.getFullYear()).slice(2);
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const rand = Math.floor(Math.random()*9000)+1000;
-  return `SVC-${yy}${mm}${dd}-${rand}`;
-}
-
-function svcBuildInvoiceEmail(rec) {
-  const lines = (rec.lineItems||[]).filter(l=>l.desc);
-  const total  = lines.reduce((s,l)=>s+parseFloat(l.amt||0),0);
-  const toCustomer = rec.invoiceTo !== 'stern';
-  const to = toCustomer ? (rec.customerEmail||'') : 'parts.service@sternpinball.com';
-  const subject = `Service Invoice ${rec.ticketNumber||''} — ${rec.machineName||'Pinball Machine'} (S/N ${rec.serialNumber||'N/A'})`;
-
-  let lineBlock = lines.map((l,i)=>
-    `  ${String(i+1).padStart(2,'0')}. ${l.desc.padEnd(40,' ')} $${parseFloat(l.amt||0).toFixed(2)}`
-  ).join('\n');
-
-  const body = toCustomer
-    ? `Hello ${rec.customerName||'Customer'},
-
-Thank you for choosing San Diego Amusements for your pinball service needs. Please find your service invoice below.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   SAN DIEGO AMUSEMENTS — SERVICE INVOICE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Ticket #: ${rec.ticketNumber||'—'}
-Date:     ${rec.serviceDate||today()}
-
-CUSTOMER
-  ${rec.customerName||''}
-  ${rec.businessName ? rec.businessName+'\n  ' : ''}${rec.customerAddress||''}, ${rec.customerCity||''}, ${rec.customerState||''} ${rec.customerZip||''}
-  Phone: ${rec.customerPhone||'—'}  |  Email: ${rec.customerEmail||'—'}
-
-MACHINE
-  ${rec.machineName||'—'} ${rec.edition ? '('+rec.edition+')' : ''}
-  Serial #: ${rec.serialNumber||'—'}
-
-ISSUE DESCRIPTION
-  ${rec.issue||'—'}
-
-${rec.techName ? 'TECHNICIAN: ' + rec.techName + '\n' : ''}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INVOICE DETAIL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-${lineBlock||'  (No line items)'}
-
-  ─────────────────────────────────────────
-  TOTAL                                  $${total.toFixed(2)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-${rec.notes ? 'NOTES:\n  ' + rec.notes + '\n\n' : ''}Payment accepted via ACH, check, or credit card.
-Please contact us with any questions: 858-205-3788
-
-Thank you,
-San Diego Amusements
-8670 Miramar Rd #A, San Diego, CA 92126
-858-205-3788`
-    : `Stern Pinball Parts & Service,
-
-Service work performed on behalf of a warranty claim. Please see details below for reimbursement.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   SAN DIEGO AMUSEMENTS — WARRANTY SERVICE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Ticket #: ${rec.ticketNumber||'—'}
-Date:     ${rec.serviceDate||today()}
-Dealer:   San Diego Amusements — Stern Dealer #${rec.dealerNumber||'SDA001'}
-
-CUSTOMER / END USER
-  ${rec.customerName||''}  ${rec.customerPhone||''}
-  ${rec.customerAddress||''}, ${rec.customerCity||''}, ${rec.customerState||''} ${rec.customerZip||''}
-
-MACHINE
-  ${rec.machineName||'—'} ${rec.edition ? '('+rec.edition+')' : ''}
-  Serial #: ${rec.serialNumber||'—'}
-
-TECHNICIAN: ${rec.techName||'—'}
-
-ISSUE
-  ${rec.issue||'—'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LABOR / PARTS CLAIM
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-${lineBlock||'  (No line items)'}
-
-  ─────────────────────────────────────────
-  TOTAL CLAIM                            $${total.toFixed(2)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-${rec.notes ? 'NOTES:\n  ' + rec.notes + '\n\n' : ''}Please process reimbursement to:
-San Diego Amusements
-8670 Miramar Rd #A, San Diego, CA 92126
-
-Thank you,
-Aaron Goldberg
-San Diego Amusements
-858-205-3788`;
-
-  return { to, subject, body };
-}
-
-function svcOpenGmail(svcId) {
-  const g = id => (document.getElementById(id)||{}).value||'';
-  // collect line items from DOM
-  const lineRows = document.querySelectorAll('.svc-line-row');
-  const lineItems = [];
-  lineRows.forEach(row => {
-    const desc = row.querySelector('.svc-line-desc')?.value||'';
-    const amt  = row.querySelector('.svc-line-amt')?.value||'';
-    if (desc) lineItems.push({desc,amt});
-  });
-  const tempRec = {
-    ticketNumber: g('svc-ticketNumber'), customerName: g('svc-customerName'),
-    businessName: g('svc-businessName'), customerEmail: g('svc-customerEmail'),
-    customerPhone: g('svc-customerPhone'), customerAddress: g('svc-customerAddress'),
-    customerCity: g('svc-customerCity'), customerState: g('svc-customerState'),
-    customerZip: g('svc-customerZip'), machineName: g('svc-machineName'),
-    edition: g('svc-edition'), serialNumber: g('svc-serialNumber'),
-    issue: g('svc-issue'), techName: g('svc-techName'),
-    serviceDate: g('svc-serviceDate'), notes: g('svc-notes'),
-    invoiceTo: g('svc-invoiceTo'), dealerNumber: g('svc-dealerNumber'),
-    lineItems
-  };
-  const {to, subject, body} = svcBuildInvoiceEmail(tempRec);
-  const url = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(url,'_blank');
-  if (svcId) {
-    DB.service = (DB.service||[]).map(s => s.id===svcId ? {...s, emailSentDate:today()} : s);
-    svcEditing = DB.service.find(s=>s.id===svcId)||svcEditing;
-    saveDB(); render();
-    showToast('✓ Invoice opened in Gmail','success');
-  }
-}
-
-function svcAddLine() {
-  const container = document.getElementById('svc-line-items');
-  if (!container) return;
-  const row = document.createElement('div');
-  row.className = 'svc-line-row';
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 120px 32px;gap:6px;margin-bottom:6px;align-items:center';
-  row.innerHTML = '<input class="svc-line-desc" placeholder="Description (labor, part, travel...)" oninput="svcUpdateTotal()" style="margin:0">'+
-    '<input class="svc-line-amt" type="number" placeholder="0.00" step="0.01" oninput="svcUpdateTotal()" style="margin:0;text-align:right">'+
-    '<button type="button" onclick="this.closest(\'.svc-line-row\').remove();svcUpdateTotal()" style="background:var(--red);color:#fff;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>';
-  container.appendChild(row);
-}
-
-function svcUpdateTotal() {
-  let total = 0;
-  document.querySelectorAll('.svc-line-amt').forEach(el => total += parseFloat(el.value||0));
-  const el = document.getElementById('svc-total-display');
-  if (el) el.textContent = '$'+total.toFixed(2);
-}
-
-function svcSubmit(e) {
-  e.preventDefault();
-  const f = e.target;
-  const r = Object.fromEntries(new FormData(f));
-  // collect line items
-  const lineItems = [];
-  document.querySelectorAll('.svc-line-row').forEach(row => {
-    const desc = row.querySelector('.svc-line-desc')?.value||'';
-    const amt  = row.querySelector('.svc-line-amt')?.value||'';
-    if (desc) lineItems.push({desc,amt});
-  });
-  r.lineItems = lineItems;
-  r.total = lineItems.reduce((s,l)=>s+parseFloat(l.amt||0),0).toFixed(2);
-  // invoiceTo and dealerNumber are outside the <form> tag — grab manually
-  const _g = id => (document.getElementById(id)||{}).value||'';
-  r.invoiceTo   = _g('svc-invoiceTo')   || r.invoiceTo   || 'customer';
-  r.dealerNumber= _g('svc-dealerNumber')|| r.dealerNumber|| 'SDA001';
-  if (!DB.service) DB.service = [];
-  if (svcEditing && svcEditing.id) {
-    const updatedRec = {...svcEditing, ...r, updatedAt: new Date().toISOString()};
-    DB.service = DB.service.map(x=>x.id===svcEditing.id ? updatedRec : x);
-    saveDB('service', svcEditing.id);
-    showToast('✓ Service ticket updated');
-  } else {
-    r.id = Date.now()+'-'+Math.random().toString(36).slice(2,10);
-    r.createdAt = today();
-    DB.service.push(r);
-    saveDB('service', r.id);
-    showToast('✓ Service ticket created');
-  }
-  svcEditing = null;
-  render();
-}
-
-function renderServiceCalls() {
-  const records = DB.service || [];
-  const esc  = v => (v||'').replace(/"/g,'&quot;');
-  const escH = v => (v||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const custOpts = getSaleCustomers().map(c=>'<option value="'+esc((c.customerName||'').trim())+'">').join('');
-
-  const rec    = svcEditing || {};
-  const isEdit = !!(svcEditing && svcEditing.id);
-
-  // Status tabs
-  const TABS = [
-    {v:'pending',     l:'📋 Pending',           color:'var(--yellow)'},
-    {v:'scheduled',   l:'📅 Scheduled',          color:'var(--blue)'},
-    {v:'in_progress', l:'🔧 In Progress',        color:'var(--accent)'},
-    {v:'waiting_parts',l:'⏳ Waiting for Parts', color:'var(--orange)'},
-    {v:'completed',   l:'✅ Completed',          color:'var(--green)'},
-    {v:'all',         l:'📁 All',                color:'var(--muted)'},
-  ];
-  const STATUS_BADGE = {pending:'bg-yellow',scheduled:'bg-blue',in_progress:'bg-orange',waiting_parts:'bg-purple',completed:'bg-green',cancelled:'bg-red'};
-
-  const tabBar = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">' +
-    TABS.map(t => {
-      const count = t.v==='all' ? records.length : records.filter(r=>r.status===t.v).length;
-      const active = svcTab===t.v;
-      return `<button onclick="svcTab='${t.v}';render()" style="padding:6px 14px;border-radius:8px;border:2px solid ${active?t.color:'var(--border)'};background:${active?t.color+'22':'transparent'};color:${active?t.color:'var(--muted)'};font-weight:700;font-size:12px;cursor:pointer">${t.l} <span style="background:${active?t.color:'var(--border)'};color:${active?'#fff':'var(--fg)'};border-radius:10px;padding:1px 7px;font-size:11px;margin-left:2px">${count}</span></button>`;
-    }).join('') + '</div>';
-
-  // Pre-fill line items from editing record
-  const existingLines = (rec.lineItems||[]).length
-    ? (rec.lineItems).map(l=>`<div class="svc-line-row" style="display:grid;grid-template-columns:1fr 120px 32px;gap:6px;margin-bottom:6px;align-items:center"><input class="svc-line-desc" placeholder="Description" value="${esc(l.desc)}" oninput="svcUpdateTotal()" style="margin:0"><input class="svc-line-amt" type="number" placeholder="0.00" step="0.01" value="${esc(l.amt)}" oninput="svcUpdateTotal()" style="margin:0;text-align:right"><button type="button" onclick="this.closest('.svc-line-row').remove();svcUpdateTotal()" style="background:var(--red);color:#fff;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button></div>`).join('')
-    : `<div class="svc-line-row" style="display:grid;grid-template-columns:1fr 120px 32px;gap:6px;margin-bottom:6px;align-items:center"><input class="svc-line-desc" placeholder="Description (labor, part, travel...)" oninput="svcUpdateTotal()" style="margin:0"><input class="svc-line-amt" type="number" placeholder="0.00" step="0.01" oninput="svcUpdateTotal()" style="margin:0;text-align:right"><button type="button" onclick="this.closest('.svc-line-row').remove();svcUpdateTotal()" style="background:var(--red);color:#fff;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button></div>`;
-
-  const existingTotal = (rec.lineItems||[]).reduce((s,l)=>s+parseFloat(l.amt||0),0).toFixed(2);
-
-  const invoiceToOpts = ['customer','stern'].map(v=>`<option value="${v}"${(rec.invoiceTo||'customer')===v?' selected':''}>${v==='customer'?'📧 Customer':'🏭 Stern Pinball (warranty)'}</option>`).join('');
-  const statusOpts = ['pending','scheduled','in_progress','waiting_parts','completed','cancelled'].map(v=>`<option value="${v}"${(rec.status||'pending')===v?' selected':''}>${v.replace('_',' ').toUpperCase()}</option>`).join('');
-  const priorityOpts = ['normal','high','urgent'].map(v=>`<option value="${v}"${(rec.priority||'normal')===v?' selected':''}>${v.toUpperCase()}</option>`).join('');
-
-  const formHtml = `
-  <div class="panel" style="margin-bottom:16px">
-    <h3 style="font-size:13px;font-weight:800;margin-bottom:14px">${isEdit?'✏️ Edit Service Ticket':'🔧 New Service Ticket'}</h3>
-    <form onsubmit="svcSubmit(event)">
-
-      <div style="font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em;margin-bottom:8px">TICKET INFO</div>
-      <div class="grid">
-        <div class="fw"><label class="fl">TICKET #</label><input id="svc-ticketNumber" name="ticketNumber" value="${esc(rec.ticketNumber||svcGenTicket())}" placeholder="SVC-YYMMDD-XXXX"></div>
-        <div class="fw"><label class="fl">SERVICE DATE</label><input id="svc-serviceDate" name="serviceDate" type="date" value="${esc(rec.serviceDate||today())}"></div>
-        <div class="fw"><label class="fl">STATUS</label><select name="status">${statusOpts}</select></div>
-        <div class="fw"><label class="fl">PRIORITY</label><select name="priority">${priorityOpts}</select></div>
-      </div>
-
-      <div style="font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em;margin:14px 0 8px">CUSTOMER INFO</div>
-      <div class="grid">
-        <div class="fw" style="grid-column:1/-1">
-          <label class="fl">CUSTOMER NAME</label>
-          <input id="svc-customerName" name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-svc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" required>
-          <datalist id="dl-cust-names-svc">${custOpts}</datalist>
-        </div>
-        <div class="fw"><label class="fl">BUSINESS NAME</label><input id="svc-businessName" name="businessName" value="${esc(rec.businessName)}" placeholder="Company (if applicable)"></div>
-        <div class="fw"><label class="fl">EMAIL</label><input id="svc-customerEmail" name="customerEmail" type="email" value="${esc(rec.customerEmail)}" placeholder="customer@email.com"></div>
-        <div class="fw"><label class="fl">PHONE</label><input id="svc-customerPhone" name="customerPhone" value="${esc(rec.customerPhone)}" placeholder="555-555-5555"></div>
-        <div class="fw" style="grid-column:1/-1"><label class="fl">STREET ADDRESS</label><input id="svc-customerAddress" name="customerAddress" value="${esc(rec.customerAddress)}" placeholder="123 Main St"></div>
-        <div class="fw"><label class="fl">CITY</label><input id="svc-customerCity" name="customerCity" value="${esc(rec.customerCity)}" placeholder="City"></div>
-        <div class="fw"><label class="fl">STATE</label><input id="svc-customerState" name="customerState" value="${esc(rec.customerState)}" placeholder="CA" style="max-width:130px"></div>
-        <div class="fw"><label class="fl">ZIP</label><input id="svc-customerZip" name="customerZip" value="${esc(rec.customerZip)}" placeholder="92101" style="max-width:130px"></div>
-      </div>
-
-      <div style="font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em;margin:14px 0 8px">MACHINE</div>
-      <div class="grid">
-        <div class="fw"><label class="fl">MACHINE NAME</label><input id="svc-machineName" name="machineName" value="${esc(rec.machineName)}" placeholder="Jaws 50th Anniversary" required></div>
-        <div class="fw"><label class="fl">EDITION</label><input id="svc-edition" name="edition" value="${esc(rec.edition)}" placeholder="Pro / Premium / LE"></div>
-        <div class="fw"><label class="fl">SERIAL NUMBER</label><input id="svc-serialNumber" name="serialNumber" value="${esc(rec.serialNumber)}" placeholder="6-digit S/N"></div>
-        <div class="fw"><label class="fl">TECHNICIAN</label>
-          <input id="svc-techName" name="techName" value="${esc(rec.techName)}" list="dl-techs-svc" placeholder="Eddie, Pablo, Pat…">
-          <datalist id="dl-techs-svc"><option value="Eddie"><option value="Pablo"><option value="Pat"><option value="Aaron Goldberg"><option value="In-house technician"></datalist>
-        </div>
-      </div>
-
-      <div style="font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em;margin:14px 0 8px">ISSUE / WORK PERFORMED</div>
-      <div class="fw" style="margin-bottom:10px"><label class="fl">DESCRIPTION OF ISSUE</label><textarea id="svc-issue" name="issue" placeholder="Describe the problem, symptoms, and work performed…" style="min-height:80px">${escH(rec.issue)}</textarea></div>
-      <div class="fw"><label class="fl">INTERNAL NOTES</label><textarea id="svc-notes" name="notes" placeholder="Follow-ups, parts ordered, customer communication…">${escH(rec.notes)}</textarea></div>
-
-      <div style="font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.06em;margin:14px 0 8px">INVOICE LINE ITEMS</div>
-      <div id="svc-line-items">${existingLines}</div>
-      <button type="button" onclick="svcAddLine()" style="background:transparent;border:1.5px dashed var(--border);color:var(--muted);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;width:100%;margin-bottom:10px">+ Add Line Item</button>
-      <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;padding:10px 14px;background:var(--panel2);border-radius:8px;margin-bottom:12px">
-        <span style="font-size:13px;font-weight:700;color:var(--muted)">TOTAL</span>
-        <span id="svc-total-display" style="font-size:20px;font-weight:900;color:var(--green)">$${existingTotal}</span>
-      </div>
-
-      <div class="br" style="margin-bottom:12px">
-        <button class="btn" type="submit">${isEdit?'Save Changes':'Create Ticket'}</button>
-        ${isEdit?'<button class="btn ghost" type="button" onclick="svcEditing=null;render()">Cancel</button>':''}
-      </div>
-    </form>
-
-    <div style="padding:14px;background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px">
-      <div style="font-size:12px;font-weight:800;color:var(--green);margin-bottom:10px">✉️ INVOICE EMAIL</div>
-      <div class="grid" style="margin-bottom:10px">
-        <div class="fw">
-          <label class="fl">SEND INVOICE TO</label>
-          <select id="svc-invoiceTo" name="invoiceTo" style="max-width:300px">${invoiceToOpts}</select>
-        </div>
-        <div class="fw">
-          <label class="fl">DEALER # (for Stern claims)</label>
-          <input id="svc-dealerNumber" name="dealerNumber" value="${esc(rec.dealerNumber||'SDA001')}" placeholder="SDA001" style="max-width:200px">
-        </div>
-      </div>
-      <div class="br">
-        ${isEdit
-          ? `<button class="btn success" onclick="svcOpenGmail('${rec.id}')">✉️ Open Invoice in Gmail &amp; Mark Sent</button>`
-          : `<button class="btn success" onclick="svcOpenGmail(null)">✉️ Preview Invoice in Gmail</button>`}
-      </div>
-      ${rec.emailSentDate?`<div style="font-size:11px;color:var(--green);margin-top:8px">✓ Last invoiced: ${escH(rec.emailSentDate)}</div>`:''}
-    </div>
-  </div>`;
-
-  // Filtered table
-  const filtered = svcTab==='all' ? records : records.filter(r=>r.status===svcTab);
-  const sorted   = [...filtered].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-
-  const tableHtml = sorted.length===0
-    ? `<div class="panel"><div class="empty">${svcTab==='all'?'No service tickets yet.':'No '+svcTab.replace('_',' ')+' tickets.'}</div></div>`
-    : `<div class="panel" style="padding:0;overflow:hidden"><table><thead><tr>
-        <th>TICKET #</th><th>DATE</th><th>CUSTOMER</th><th>MACHINE</th><th>ISSUE</th>
-        <th>TECH</th><th>TOTAL</th><th>STATUS</th><th>INVOICED</th><th></th>
-      </tr></thead><tbody>` +
-      sorted.map(c => {
-        const total = (c.lineItems||[]).reduce((s,l)=>s+parseFloat(l.amt||0),0);
-        return `<tr>
-          <td style="font-family:monospace;font-size:11px;color:var(--accent)">${escH(c.ticketNumber||'—')}</td>
-          <td style="font-size:12px;color:var(--muted)">${escH(c.serviceDate||c.createdAt||'—')}</td>
-          <td style="font-size:12px"><div style="font-weight:700">${escH(c.customerName||'—')}</div>${c.businessName?`<div style="font-size:11px;color:var(--muted)">${escH(c.businessName)}</div>`:''}</td>
-          <td style="font-size:12px"><div style="font-weight:700">${escH(c.machineName||'—')}</div>${c.serialNumber?`<div style="font-size:11px;color:var(--muted)">S/N ${escH(c.serialNumber)}</div>`:''}</td>
-          <td style="font-size:11px;max-width:140px;color:var(--muted)">${escH((c.issue||'—').substring(0,60))}${(c.issue||'').length>60?'…':''}</td>
-          <td style="font-size:12px">${escH(c.techName||'—')}</td>
-          <td style="font-weight:800;color:var(--green)">$${total.toFixed(2)}</td>
-          <td><span class="badge ${STATUS_BADGE[c.status]||'bg-blue'}">${escH((c.status||'pending').replace('_',' ').toUpperCase())}</span></td>
-          <td style="font-size:11px;color:${c.emailSentDate?'var(--green)':'var(--muted)'}">${escH(c.emailSentDate||'—')}</td>
-          <td><div style="display:flex;gap:5px">
-            <button class="btn sm warn" onclick="svcEditing=DB.service.find(x=>x.id==='${c.id}');render();window.scrollTo(0,0)">✏️ Edit</button>
-            <button class="btn sm success" onclick="svcEditing=DB.service.find(x=>x.id==='${c.id}');setTimeout(()=>svcOpenGmail('${c.id}'),50)" title="Send Invoice">✉️</button>
-            <button class="btn sm danger" onclick="if(svcEditing&&svcEditing.id==='${c.id}')svcEditing=null;delRow('service','${c.id}')">✕</button>
-          </div></td>
-        </tr>`;
-      }).join('') +
-      `</tbody></table></div>`;
-
-  // Stats
-  const open      = records.filter(r=>r.status==='pending'||r.status==='in_progress'||r.status==='scheduled').length;
-  const waiting   = records.filter(r=>r.status==='waiting_parts').length;
-  const completed = records.filter(r=>r.status==='completed').length;
-  const revenue   = records.filter(r=>r.status==='completed').reduce((s,r)=>s+parseFloat(r.total||0),0);
-
-  return `
-  <h1 class="pt">🔧 Service Calls</h1>
-  <div class="grid3" style="margin-bottom:18px">
-    <div class="stat"><div class="sl">TOTAL TICKETS</div><div class="sv" style="color:var(--accent)">${records.length}</div></div>
-    <div class="stat"><div class="sl">OPEN / ACTIVE</div><div class="sv" style="color:var(--yellow)">${open}</div></div>
-    <div class="stat"><div class="sl">WAITING PARTS</div><div class="sv" style="color:var(--purple)">${waiting}</div></div>
-    <div class="stat"><div class="sl">COMPLETED</div><div class="sv" style="color:var(--green)">${completed}</div></div>
-    <div class="stat"><div class="sl">COMPLETED REVENUE</div><div class="sv" style="color:var(--green)">$${revenue.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
-  </div>
-  ${formHtml}
-  <h3 class="st" style="margin-bottom:10px">SERVICE TICKETS (${records.length})</h3>
-  ${tabBar}
-  ${tableHtml}`;
-}
 function renderWarrantyClaims() {
-
   const claims = DB.warrantyClaims || [];
   if (wcEditing && wcEditing.id && !claims.find(c => c.id === wcEditing.id)) wcEditing = null;
 
@@ -4504,7 +4135,7 @@ function renderWarrantyClaims() {
   const approved = claims.filter(c => c.status === 'approved').length;
   const resolved = claims.filter(c => c.status === 'resolved').length;
   const denied   = claims.filter(c => c.status === 'denied').length;
-  const wcStatusBadge = { pending:'bg-yellow', submitted:'bg-blue', approved:'bg-green', parts_shipped:'bg-purple', resolved:'bg-green', denied:'bg-red' };
+  const statusBadge = { pending:'bg-yellow', submitted:'bg-blue', approved:'bg-green', parts_shipped:'bg-purple', resolved:'bg-green', denied:'bg-red' };
   const rec    = wcEditing || {};
   const isEdit = !!(wcEditing && wcEditing.id);
   const emailPreview = wcBuildEmail(rec);
@@ -4642,7 +4273,7 @@ function renderWarrantyClaims() {
         '<td style="max-width:140px;font-size:12px">' + escH((c.problem||'—').substring(0,60)) + ((c.problem||'').length>60?'…':'') + '</td>' +
         '<td style="font-family:monospace;font-size:11px;color:var(--muted)">' + escH(c.poNumber||'—') + '</td>' +
         '<td style="font-size:11px;max-width:110px">' + escH((c.partDesc||'—').substring(0,40)) + ((c.partDesc||'').length>40?'…':'') + '</td>' +
-        '<td><span class="badge ' + (wcStatusBadge[c.status]||'bg-blue') + '">' + escH((c.status||'pending').replace('_',' ').toUpperCase()) + '</span></td>' +
+        '<td><span class="badge ' + (statusBadge[c.status]||'bg-blue') + '">' + escH((c.status||'pending').replace('_',' ').toUpperCase()) + '</span></td>' +
         '<td style="font-size:11px;color:' + (c.emailSentDate?'var(--green)':'var(--muted)') + '">' + escH(c.emailSentDate||'—') + '</td>' +
         '<td><div style="display:flex;gap:5px">' +
           '<button class="btn sm warn" data-wc-id="' + c.id + '" onclick="wcEditing=DB.warrantyClaims.find(x=>x.id===this.dataset.wcId);render();window.scrollTo(0,0)">✏️ Edit</button>' +
@@ -4766,8 +4397,7 @@ async function _startApp(user) {
         <div class="dd" id="ddate"></div>
       </header>
       <main id="mc"></main>
-    </div>
-    <div id="ver-bar" style="position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);text-align:center;padding:3px 0;font-size:10px;font-weight:700;color:rgba(255,255,255,.35);letter-spacing:.08em;pointer-events:none;z-index:9999">SDA PINBALL INVENTORY &nbsp;·&nbsp; ${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</div>`;
+    </div>`;
     _delegatedListenersReady = false; // reset so listeners rebind on new DOM
   }
   const userEmailEl = document.getElementById('user-email');
