@@ -4281,7 +4281,6 @@ function svcUpdateTotal() {
 
 function svcSubmit(e) {
   e.preventDefault();
-  if (_submitting) return; _submitting = true;
   const f = e.target;
   const r = Object.fromEntries(new FormData(f));
   // collect line items
@@ -4293,19 +4292,25 @@ function svcSubmit(e) {
   });
   r.lineItems = lineItems;
   r.total = lineItems.reduce((s,l)=>s+parseFloat(l.amt||0),0).toFixed(2);
+  // invoiceTo and dealerNumber are outside the <form> tag — grab manually
+  const _g = id => (document.getElementById(id)||{}).value||'';
+  r.invoiceTo   = _g('svc-invoiceTo')   || r.invoiceTo   || 'customer';
+  r.dealerNumber= _g('svc-dealerNumber')|| r.dealerNumber|| 'SDA001';
   if (!DB.service) DB.service = [];
   if (svcEditing && svcEditing.id) {
-    DB.service = DB.service.map(x=>x.id===svcEditing.id?{...x,...r}:x);
+    const updatedRec = {...svcEditing, ...r, updatedAt: new Date().toISOString()};
+    DB.service = DB.service.map(x=>x.id===svcEditing.id ? updatedRec : x);
+    saveDB('service', svcEditing.id);
     showToast('✓ Service ticket updated');
   } else {
     r.id = Date.now()+'-'+Math.random().toString(36).slice(2,10);
     r.createdAt = today();
     DB.service.push(r);
+    saveDB('service', r.id);
     showToast('✓ Service ticket created');
   }
-  saveDB();
   svcEditing = null;
-  setTimeout(()=>{_submitting=false;render();},80);
+  render();
 }
 
 function renderServiceCalls() {
