@@ -174,7 +174,7 @@ td.m{color:var(--muted)}
 h1.pt{font-size:22px;font-weight:900;margin-bottom:14px}
 h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;letter-spacing:.06em}
 .rr{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:center}
-.dd{margin-left:auto;font-size:12px;color:var(--muted)}
+.dd{margin-left:auto;font-size:12px;color:var(--text);font-weight:600}
 .pg{display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .pg button{background:var(--panel2);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}
 .pg button.cur{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -204,7 +204,7 @@ h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;lette
     <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
     <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
     <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-    <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
+    <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
   </header>
   <main id="mc"></main>
 </div>
@@ -3131,7 +3131,7 @@ async function fetchShopifyFromGmail() {
 function render() {
   try {
     const sfEl = document.getElementById('sf'); if (sfEl) sfEl.textContent = `${(DB.inventory||[]).length} games · ${(DB.pendingSales||[]).filter(p=>p.paymentStatus!=='PIF').length} pending`;
-    const ddEl = document.getElementById('ddate'); if (ddEl) { const dateStr = new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); const verEl = document.getElementById('ver-inline'); if (!verEl) { ddEl.innerHTML = `<span>${dateStr}</span><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span>`; } else { const dateSpan = ddEl.querySelector('span:not(#ver-inline)'); if (dateSpan) dateSpan.textContent = dateStr; else ddEl.insertAdjacentHTML('afterbegin', `<span>${dateStr}</span>`); } }
+    const ddEl = document.getElementById('ddate'); if (ddEl) { const dateStr = new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); const verEl = document.getElementById('ver-inline'); if (!verEl) { ddEl.innerHTML = `<span>${dateStr}</span><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span>`; } else { const dateSpan = ddEl.querySelector('span:not(#ver-inline)'); if (dateSpan) dateSpan.textContent = dateStr; else ddEl.insertAdjacentHTML('afterbegin', `<span>${dateStr}</span>`); } }
     const mc = document.getElementById('mc'); if (!mc) return;
     mc.innerHTML = ({
       dashboard: renderDashboard,
@@ -4844,7 +4844,7 @@ async function _startApp(user) {
         <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
         <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
         <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-        <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--border);letter-spacing:.06em;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
+        <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
       </header>
       <main id="mc"></main>
     </div>`;
