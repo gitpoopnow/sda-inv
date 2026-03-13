@@ -215,7 +215,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/a/macros/sandiegoamusements.com/s/AKfycbxxc7k_xVoin1fLgnkPzCY91a_5UnmiksY7crdhV35-2neAWbu-_hr3hdTHujIcAXx1/exec'; // Google Apps Script Web App URL
 const SYNC_KEY = 'sda_9Kx2mP7qR4nW8vL3jT5hY6'; // Apps Script secret key
-const BUILD_VERSION = 'v1.05'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.06'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -367,15 +367,35 @@ function _startRealTimeWatch() {
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
-      // Block overwrite if we saved recently OR if there are still pending saves in the queue
-      const hasPendingForCol = Object.keys(_saveQueue).some(k => k.startsWith(c + '::'));
-      if (Date.now() - _lastSaveTime < 8000) return; // extended guard window
-      if (hasPendingForCol) return; // don't let Firestore echo stomp unsaved local changes
-      if (_saveTimer) return; // save debounce still ticking
+      // Don't overwrite while a save debounce is still ticking (data mid-flight)
+      if (_saveTimer) return;
       const anyInputFocused = document.activeElement &&
         ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
       if (anyInputFocused) return;
-      DB[c] = records;
+
+      // Record-level merge: only block records with a pending local save.
+      // This fixes the multi-computer sync bug where the broad 8s guard caused
+      // stale data to overwrite changes made on another device.
+      const pendingIds = new Set(
+        Object.keys(_saveQueue)
+          .filter(k => k.startsWith(c + '::'))
+          .map(k => k.slice(c.length + 2))
+      );
+
+      if (pendingIds.size === 0) {
+        // No pending local saves — safe to replace the whole collection
+        DB[c] = records;
+      } else {
+        // Merge: keep locally-pending records, apply Firestore for everything else
+        const fsMap = new Map(records.map(r => [r.id, r]));
+        const localIds = new Set((DB[c] || []).map(r => r.id));
+        DB[c] = (DB[c] || []).map(local =>
+          pendingIds.has(local.id) ? local : (fsMap.get(local.id) || local)
+        );
+        // Add any brand-new records from Firestore not yet in local DB
+        records.forEach(r => { if (!localIds.has(r.id)) DB[c].push(r); });
+      }
+
       ensureTables();
       saveLocal();
       render();
