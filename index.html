@@ -145,12 +145,24 @@ _auth.onAuthStateChanged(user => {
   }
 });
 
-// Handle redirect result on mobile — fires after returning from Google sign-in redirect
+// Handle redirect result on mobile — must be called before onAuthStateChanged
+// fires to ensure the session is established after returning from Google redirect
 _auth.getRedirectResult().then(result => {
-  // User will be picked up by onAuthStateChanged above — nothing extra needed
+  if (result && result.user) {
+    // Redirect sign-in completed — onAuthStateChanged will fire with the user
+    window._fbUser = result.user;
+    if (typeof window._onAuthChange === 'function') {
+      window._onAuthChange(result.user);
+    } else {
+      window._fbPendingAuthUser = { resolved: true, user: result.user };
+    }
+  }
 }).catch(e => {
-  if (e.code !== 'auth/no-auth-event') {
+  if (e.code !== 'auth/no-auth-event' && e.code !== 'auth/null-user') {
     console.warn('[SDA] Redirect sign-in error:', e.message);
+    // Show error on login screen if visible
+    const errEl = document.getElementById('login-err');
+    if (errEl) errEl.textContent = e.message;
   }
 });
 </script>
@@ -356,7 +368,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.31'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.32'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -5806,7 +5818,10 @@ async function init() {
     if (user) {
       await _startApp(user);
     } else {
-      _showLoginScreen();
+      // On mobile, don't show login screen yet — wait to see if a redirect result is coming
+      if (!window._fbRedirectPending) {
+        _showLoginScreen();
+      }
     }
   };
 
@@ -5821,6 +5836,25 @@ async function init() {
       document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;color:#ef4444;font-family:system-ui">Firebase failed to load. Check your internet connection and reload the page.</div>';
       return;
     }
+  }
+
+  // On mobile, check for pending redirect result BEFORE handling auth state
+  const _isMobileInit = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (_isMobileInit) {
+    window._fbRedirectPending = true;
+    try {
+      const result = await window._fbAuth ? window._fbAuth.getRedirectResult() : _auth.getRedirectResult();
+      if (result && result.user) {
+        window._fbRedirectPending = false;
+        await _startApp(result.user);
+        return;
+      }
+    } catch(e) {
+      if (e.code !== 'auth/no-auth-event' && e.code !== 'auth/null-user') {
+        console.warn('[SDA] Redirect result error:', e.message);
+      }
+    }
+    window._fbRedirectPending = false;
   }
 
   // If onAuthStateChanged already fired before we set _onAuthChange, handle it now
