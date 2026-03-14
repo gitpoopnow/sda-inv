@@ -352,7 +352,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.47'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.49'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -4138,11 +4138,98 @@ async function extractInvoiceData(input) {
     setStatus('var(--green)', `✅ Filled ${filled} fields — review and save`);
     showToast(`✅ Invoice parsed — ${filled} fields filled!`);
 
+    // Check if parsed machine name matches inventory — show picker if not found
+    if (fields.machineName) {
+      const mn = fields.machineName.toLowerCase().trim();
+      const exactMatch = (DB.inventory||[]).find(i =>
+        i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn
+      );
+      if (!exactMatch) {
+        // Find close matches
+        const fuzzy = (DB.inventory||[]).filter(i =>
+          i.status !== 'sold' && (
+            (i.machineName||'').toLowerCase().includes(mn.slice(0,6)) ||
+            mn.includes((i.machineName||'').toLowerCase().slice(0,6))
+          )
+        ).slice(0, 8);
+        showInvoiceMachinePicker(fields.machineName, fuzzy, form);
+      }
+    }
+
   } catch(err) {
     console.error('Invoice parse error:', err);
     setStatus('var(--red)', '⚠️ ' + (err.message || 'Could not read PDF'));
     showToast('⚠️ Could not parse invoice', 'error');
   }
+}
+
+function showInvoiceMachinePicker(parsedName, suggestions, form) {
+  // Remove any existing picker
+  document.getElementById('inv-machine-picker')?.remove();
+
+  const activeInv = (DB.inventory||[]).filter(i => i.status !== 'sold');
+  // Group unique machine names
+  const uniqueNames = [...new Set(activeInv.map(i => i.machineName).filter(Boolean))].sort();
+
+  const modal = document.createElement('div');
+  modal.id = 'inv-machine-picker';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+      <div style="font-size:15px;font-weight:900;margin-bottom:6px">⚠️ Machine Not Found in Inventory</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Invoice says: <strong style="color:var(--yellow)">"${esc(parsedName)}"</strong> — no exact match in your active inventory.</div>
+
+      ${suggestions.length ? `
+        <div style="font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.06em;margin-bottom:8px">CLOSE MATCHES IN INVENTORY</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+          ${suggestions.map(i => `
+            <button onclick="selectInvoiceMachine('${esc(i.machineName)}');document.getElementById('inv-machine-picker').remove()"
+              style="text-align:left;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;color:var(--text)">
+              <div style="font-weight:700;font-size:13px">${esc(i.machineName)}</div>
+              <div style="font-size:11px;color:var(--muted)">SN: ${esc(i.serialNumber||'—')} · ${esc(i.status)}</div>
+            </button>`).join('')}
+        </div>` : ''}
+
+      <div style="font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.06em;margin-bottom:8px">ALL ACTIVE INVENTORY</div>
+      <input id="inv-picker-search" placeholder="🔍 Search inventory…" oninput="filterInvPicker(this.value)"
+        style="width:100%;margin-bottom:8px;border-radius:7px;padding:7px 10px;background:var(--panel2);border:1px solid var(--border);color:var(--text);font-size:13px">
+      <div id="inv-picker-list" style="display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto">
+        ${uniqueNames.map(n => `
+          <button onclick="selectInvoiceMachine('${esc(n)}');document.getElementById('inv-machine-picker').remove()"
+            style="text-align:left;background:transparent;border:1px solid var(--border);border-radius:6px;padding:7px 12px;cursor:pointer;color:var(--text);font-size:13px"
+            onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background='transparent'">
+            ${esc(n)}
+          </button>`).join('')}
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button onclick="document.getElementById('inv-machine-picker').remove()"
+          style="flex:1;background:var(--panel2);color:var(--muted);border:1px solid var(--border);border-radius:7px;padding:8px;cursor:pointer;font-size:13px">
+          Keep "${esc(parsedName.slice(0,20))}…"
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function filterInvPicker(query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll('#inv-picker-list button').forEach(btn => {
+    btn.style.display = btn.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function selectInvoiceMachine(name) {
+  // Set the machine name field in the sales form
+  const form = document.querySelector('form[onsubmit*="submitSale"]');
+  if (!form) return;
+  const el = form.querySelector('[name="machineName"]') || document.getElementById('pi-sale-title');
+  if (el) {
+    el.value = name;
+    // Trigger the serial dropdown to refresh
+    if (typeof onSaleTitleSelect === 'function') onSaleTitleSelect(name);
+  }
+  showToast(`✅ Machine set to: ${name}`);
 }
 
 function parseSDAInvoice(rawText) {
@@ -4239,15 +4326,15 @@ function parseSDAInvoice(rawText) {
         }
       }
 
-      // City/State/Zip — "City, ST 12345" or "City ST 12345" (with or without comma)
+      // City/State/Zip — "City, ST 12345" or "City ST 12345" (with or without comma, state may be mixed case)
       for (const bline of block) {
         const d = dedup(bline);
-        // With comma: "Fountain Hills, AZ 85268"
-        const csz1 = d.match(/^(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
+        // With comma: "Fountain Hills, AZ 85268" or "Phoenix, Az 85048"
+        const csz1 = d.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)/);
         // Without comma: "Fountain Hills AZ 85268"
-        const csz2 = d.match(/^(.+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+        const csz2 = d.match(/^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
         const csz = csz1 || csz2;
-        if (csz) { fields.customerCity=csz[1].trim(); fields.customerState=csz[2]; fields.customerZip=csz[3]; break; }
+        if (csz) { fields.customerCity=csz[1].trim(); fields.customerState=csz[2].toUpperCase(); fields.customerZip=csz[3]; break; }
       }
 
       // Phone — standalone phone line
