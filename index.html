@@ -360,7 +360,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.57'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.58'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1053,7 +1053,7 @@ function renderDashboard() {
   const atBar = inv.filter(i=>i.section==='BAR' || i.status==='on_location').length;
   const soldInv = inv.filter(i=>i.status==='sold').length;
   const openSales = (DB.sales||[]).filter(s=>s.status!=='closed'&&s.status!=='cancelled').length;
-  const openService = (DB.service||[]).filter(s=>s.status==='open').length;
+  const openService = (DB.service||[]).filter(s=>!['completed','cancelled','resolved','closed'].includes(s.status)).length;
   const stats = [
     {l:'TOTAL INVENTORY', v:inv.length,        c:'var(--accent)',  click:`goto('inventory',{status:''})`},
     {l:'IN STOCK',        v:inStock,            c:'var(--green)',   click:`goto('inventory',{status:'in_stock'})`},
@@ -6051,9 +6051,9 @@ function _startDemo() {
       {id:'lead-005',createdAt:'2026-03-08',name:'Carlos Rivera',email:'c.rivera@biz.com',phone:'305-555-0244',interestedMachine:'Foo Fighters Premium',source:'Referral',status:'new'},
     ],
     service: [
-      {id:'svc-001',createdAt:'2026-02-15',customerName:'Dave Williams',customerEmail:'dave.williams@pacificarcade.com',customerPhone:'503-555-0147',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',invNumber:'1522',issueType:'Warranty',description:'Right flipper unresponsive after 2 weeks. Coil getting hot.',status:'open',techNotes:'Likely coil or EOS switch issue. Parts ordered.',resolution:'',dealerNumber:'DEMO001',createdDate:'2026-02-15'},
-      {id:'svc-002',createdAt:'2026-01-20',customerName:'Tom Bradley',customerEmail:'tom.bradley@gmail.com',customerPhone:'415-555-0134',machineName:'Jaws Premium',serialNumber:'J2501001',invNumber:'1508',issueType:'Warranty',description:'Display flickering on startup — intermittent.',status:'closed',techNotes:'Replaced display ribbon cable connector. Issue resolved.',resolution:'Replaced ribbon connector under warranty. No charge to customer.',dealerNumber:'DEMO001',createdDate:'2026-01-20'},
-      {id:'svc-003',createdAt:'2026-03-02',customerName:'Sarah Chen',customerEmail:'sarah.chen@funzone.com',customerPhone:'702-555-0271',machineName:'Deadpool Premium',serialNumber:'DP2412001',invNumber:'1512',issueType:'Customer Request',description:'Ball getting stuck behind ramp on left side. Needs adjustment.',status:'open',techNotes:'',resolution:'',dealerNumber:'DEMO001',createdDate:'2026-03-02'},
+      {id:'svc-001',createdAt:'2026-02-15',customerName:'Dave Williams',customerEmail:'dave.williams@pacificarcade.com',customerPhone:'503-555-0147',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',invNumber:'1522',issueType:'Warranty',description:'Right flipper unresponsive after 2 weeks. Coil getting hot.',status:'in_progress',techNotes:'Likely coil or EOS switch issue. Parts ordered.',resolution:'',dealerNumber:'DEMO001',createdDate:'2026-02-15'},
+      {id:'svc-002',createdAt:'2026-01-20',customerName:'Tom Bradley',customerEmail:'tom.bradley@gmail.com',customerPhone:'415-555-0134',machineName:'Jaws Premium',serialNumber:'J2501001',invNumber:'1508',issueType:'Warranty',description:'Display flickering on startup — intermittent.',status:'completed',techNotes:'Replaced display ribbon cable connector. Issue resolved.',resolution:'Replaced ribbon connector under warranty. No charge to customer.',dealerNumber:'DEMO001',createdDate:'2026-01-20'},
+      {id:'svc-003',createdAt:'2026-03-02',customerName:'Sarah Chen',customerEmail:'sarah.chen@funzone.com',customerPhone:'702-555-0271',machineName:'Deadpool Premium',serialNumber:'DP2412001',invNumber:'1512',issueType:'Customer Request',description:'Ball getting stuck behind ramp on left side. Needs adjustment.',status:'pending',techNotes:'',resolution:'',dealerNumber:'DEMO001',createdDate:'2026-03-02'},
     ],
     wantList: [
       {id:'want-001',createdAt:'2026-02-10',machineName:'Metallica Premium Remastered',customerName:'Jeff Morrison',businessName:'',customerEmail:'jeff.m@email.com',customerPhone:'503-555-0155',maxPrice:'5500',invNumber:'',priority:'high',status:'active'},
@@ -6153,7 +6153,8 @@ async function _startApp(user) {
   _setupDelegatedListeners();
   ensureTables();
   render();
-  await loadDB();
+  if (!window.DEMO_MODE) await loadDB();
+  else { ensureTables(); render(); } // demo: data already loaded in _startDemo
   ensureTables();
   shopifyDismissed = new Set((DB.shopifyDismissed || []).map(r => r.id || r));
   render();
