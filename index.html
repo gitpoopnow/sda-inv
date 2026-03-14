@@ -250,7 +250,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.25'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.27'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -3384,7 +3384,7 @@ function render() {
       fulfillment: ()=>renderFulfillment(),
       warranty: ()=>renderWarrantyClaims(),
       shopify: ()=>renderShopifyOrders(),
-      partorders: ()=>renderPartOrders(),
+      partorders: ()=>{ const h = renderPartOrders(); setTimeout(()=>{ if(!partOrderEditing && document.getElementById('po-lines-wrap') && !document.querySelector('.po-line-row')) addPartOrderLine(); },50); return h; },
     }[section]||renderDashboard)();
   } catch(err) {
     console.error('[SDA render error]', err);
@@ -4370,15 +4370,12 @@ function renderPartOrders() {
     if (!gameGroups[g]) gameGroups[g] = [];
     gameGroups[g].push(p);
   });
-  const stockIcon = s => s==='In Stock'?'✅':s==='Low Stock'?'🟡':s==='Out of Stock'?'🔴':s==='Backorder'?'🟠':s==='Almost Gone'?'⚠️':s==='Coming Soon'?'🔵':s==='Orders Closed'?'⛔':'';
   const knownOpts = '<option value="">— Select a known Stern part —</option>' +
     Object.entries(gameGroups).map(([game, parts]) =>
       `<optgroup label="${esc(game)}">`+
       parts.map(p => {
-        const icon = stockIcon(p.stock);
         const costStr = p.cost ? ' — $'+p.cost+' wholesale' : '';
-        const stockStr = p.stock ? ' ['+p.stock+']' : '';
-        return `<option value="${esc(p.name)}" data-part-id="${esc(p.id)}" data-cost="${p.cost||''}" data-stock="${esc(p.stock||'')}" data-notes="${esc(p.notes||'')}">${icon} ${esc(p.name)}${p.id?' ('+p.id+')':''}${costStr}${stockStr}</option>`;
+        return `<option value="${esc(p.name)}" data-part-id="${esc(p.id)}" data-cost="${p.cost||''}" data-stockstatus="${esc(p.stockStatus||'')}" data-notes="${esc(p.notes||'')}">${esc(p.name)}${p.id?' ('+p.id+')':''}${costStr}</option>`;
       }).join('')+
       '</optgroup>'
     ).join('');
@@ -4392,18 +4389,13 @@ function renderPartOrders() {
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:14px">${partOrderEditing ? '✏️ Edit Order' : '➕ New Parts Order'}</h3>
     <form onsubmit="submitPartOrder(event)">
+
+      ${partOrderEditing ? `
+      <!-- EDIT MODE: single item fields -->
       <div class="grid">
-        <div class="fw" style="grid-column:1/-1">
-          <label class="fl">PART NAME — grouped by game</label>
-          <select id="po-known-select" onchange="onPartOrderSelect(this)" style="margin-bottom:6px">
-            ${knownOpts}
-          </select>
-          <div id="po-stock-info" style="display:none;gap:8px;align-items:center;padding:6px 10px;background:var(--panel2);border-radius:7px;font-size:12px;margin-top:4px"></div>
-        </div>
-        <div class="fw"><label class="fl">ITEM NAME</label><input name="itemName" id="po-item-name" value="${esc(rec.itemName||'')}" required placeholder="Part name"></div>
-        <div class="fw"><label class="fl">PART ID / SKU</label><input name="partId" id="po-part-id" value="${esc(rec.partId||'')}" placeholder="e.g. 502-7145-00"></div>
+        <div class="fw"><label class="fl">ITEM NAME</label><input name="itemName" value="${esc(rec.itemName||'')}" required></div>
+        <div class="fw"><label class="fl">PART ID</label><input name="partId" value="${esc(rec.partId||'')}" style="font-family:monospace"></div>
         <div class="fw"><label class="fl">QTY</label><input type="number" name="qty" min="1" value="${rec.qty||1}" required></div>
-        <div class="fw"><label class="fl">UNIT COST ($)</label><input type="number" step="0.01" name="unitCost" value="${rec.unitCost||''}" placeholder="0.00"></div>
         <div class="fw"><label class="fl">STATUS</label>
           <select name="status">
             ${['ordered','backordered','shipped','received','cancelled'].map(s=>`<option value="${s}"${(rec.status||'ordered')===s?' selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
@@ -4416,10 +4408,33 @@ function renderPartOrders() {
         <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNum" value="${esc(rec.trackingNum||'')}" placeholder="Tracking number"></div>
         <div class="fw"><label class="fl">RECEIVED DATE</label><input type="date" name="receivedDate" value="${rec.receivedDate||''}"></div>
       </div>
-      <div class="fw" style="margin-bottom:10px"><label class="fl">NOTES</label><textarea name="notes" placeholder="Any special notes for this order...">${esc(rec.notes||'')}</textarea></div>
+      <div class="fw" style="margin-bottom:10px"><label class="fl">NOTES</label><textarea name="notes">${esc(rec.notes||'')}</textarea></div>
+      ` : `
+      <!-- NEW ORDER MODE: multi-line items -->
+      <div style="margin-bottom:12px">
+        <label class="fl">ORDER DATE</label>
+        <input type="date" name="orderDate" value="${today()}" style="width:180px">
+      </div>
+
+      <div id="po-lines-wrap">
+        <div style="display:grid;grid-template-columns:2fr 1fr 60px auto;gap:8px;align-items:center;margin-bottom:4px;padding:0 4px">
+          <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em">PART NAME / ID</span>
+          <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em">PART ID</span>
+          <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em">QTY</span>
+          <span></span>
+        </div>
+      </div>
+      <button type="button" class="btn ghost" style="font-size:12px;margin-bottom:14px" onclick="addPartOrderLine()">+ Add Another Part</button>
+
+      <div class="grid" style="margin-top:4px">
+        <div class="fw"><label class="fl">INV # (linked sale)</label><input name="invNumber" value="" placeholder="e.g. 1492"></div>
+        <div class="fw"><label class="fl">NOTES</label><input name="notes" placeholder="Any order notes…"></div>
+      </div>
+      `}
+
       <div class="br" style="gap:8px;flex-wrap:wrap">
         <button class="btn" type="submit">${partOrderEditing ? 'Save Changes' : '📧 Place Order via Email'}</button>
-        ${partOrderEditing ? `<button class="btn ghost" type="button" onclick="partOrderEditing=null;render()">Cancel</button>` : `<button class="btn ghost" type="button" onclick="this.closest('form').reset();document.getElementById('po-known-select').selectedIndex=0;document.getElementById('po-item-name').value='';document.getElementById('po-part-id').value=''">Clear</button>`}
+        ${partOrderEditing ? `<button class="btn ghost" type="button" onclick="partOrderEditing=null;render()">Cancel</button>` : `<button class="btn ghost" type="button" onclick="partOrderEditing=null;render()">Clear</button>`}
         ${partOrderEditing && partOrderEditing.status !== 'received' ? `<button class="btn success" type="button" onclick="markPartOrderReceived('${partOrderEditing.id}')">✅ Mark Received & Add to Inventory</button>` : ''}
       </div>
     </form>
@@ -4466,25 +4481,87 @@ function renderPartOrders() {
   </div>`;
 }
 
+function addPartOrderLine() {
+  const wrap = document.getElementById('po-lines-wrap');
+  if (!wrap) return;
+  const lineNum = wrap.querySelectorAll('.po-line-row').length;
+  const knownOptsHtml = '<option value="">— Select known part —</option>' +
+    STERN_KNOWN_PARTS.map(p => {
+      const g = p.game ? '['+p.game+'] ' : '';
+      return `<option value="${esc(p.name)}" data-part-id="${esc(p.id||'')}" data-cost="${p.cost||''}" data-stockstatus="${esc(p.stockStatus||'')}" data-notes="${esc(p.notes||'')}">${g}${esc(p.name)}${p.id?' ('+p.id+')':''}</option>`;
+    }).join('');
+
+  const row = document.createElement('div');
+  row.className = 'po-line-row';
+  row.style.cssText = 'background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:10px';
+  row.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 60px auto;gap:8px;align-items:end;margin-bottom:8px">
+      <div>
+        <label class="fl" style="font-size:10px">PART NAME</label>
+        <select class="po-line-select" onchange="onLinePartSelect(this)" style="width:100%">
+          ${knownOptsHtml}
+        </select>
+      </div>
+      <div>
+        <label class="fl" style="font-size:10px">PART ID</label>
+        <input class="po-line-partid" style="font-family:monospace;width:100%" placeholder="auto-filled or custom">
+      </div>
+      <div>
+        <label class="fl" style="font-size:10px">QTY</label>
+        <input class="po-line-qty" type="number" min="1" value="1" style="width:100%;text-align:center">
+      </div>
+      <button type="button" onclick="this.closest('.po-line-row').remove()" style="padding:8px 10px;background:var(--red);color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:14px;margin-top:18px">✕</button>
+    </div>
+    <div class="po-line-info" style="display:none;font-size:11px;padding:5px 8px;background:var(--bg);border-radius:6px;gap:10px;flex-wrap:wrap"></div>
+  `;
+  wrap.appendChild(row);
+}
+
+function onLinePartSelect(sel) {
+  const row = sel.closest('.po-line-row');
+  if (!row) return;
+  const opt = sel.options[sel.selectedIndex];
+  const partId = opt.dataset.partId || '';
+  const partName = opt.value || '';
+
+  // Fill part ID
+  const pidEl = row.querySelector('.po-line-partid');
+  if (pidEl) pidEl.value = partId;
+
+  // Show stock + our inventory info
+  const infoEl = row.querySelector('.po-line-info');
+  if (!infoEl || !partName) { if(infoEl) infoEl.style.display='none'; return; }
+
+  const notes = opt.dataset.notes || '';
+
+  // Look up our own inventory
+  const ourPart = (DB.parts||[]).find(p =>
+    (partId && (p.partId||'').trim() === partId.trim()) ||
+    (p.itemName||'').toLowerCase().trim() === partName.toLowerCase().trim()
+  );
+  const ourOnHand = ourPart ? (ourPart.onHand !== undefined && ourPart.onHand !== '' ? Number(ourPart.onHand) : (Number(ourPart.startQty||0)+Number(ourPart.addedQty||0)-Number(ourPart.soldQty||0))) : null;
+
+  const parts = [];
+  if (ourPart) {
+    const color = ourOnHand > 0 ? 'var(--green)' : ourOnHand < 0 ? 'var(--red)' : 'var(--muted)';
+    parts.push(`<span>📦 Our stock: <strong style="color:${color}">${ourOnHand}</strong> on hand</span>`);
+  } else {
+    parts.push(`<span style="color:var(--muted)">📦 Not in our parts inventory yet</span>`);
+  }
+  if (notes) parts.push(`<span style="color:var(--muted);font-size:11px">${esc(notes)}</span>`);
+
+  infoEl.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+  infoEl.style.display = 'flex';
+}
+
 function onPartOrderSelect(sel) {
+  // Legacy — used in edit mode only (single item)
   const opt = sel.options[sel.selectedIndex];
   if (!opt || !opt.value) return;
-  document.getElementById('po-item-name').value = opt.value;
-  document.getElementById('po-part-id').value   = opt.dataset.partId || '';
-  // Auto-fill cost if available
-  if (opt.dataset.cost) {
-    const costEl = document.querySelector('input[name="unitCost"]');
-    if (costEl && !costEl.value) costEl.value = opt.dataset.cost;
-  }
-  // Show stock status warning
-  const infoEl = document.getElementById('po-stock-info');
-  if (infoEl) {
-    const stock = opt.dataset.stock || '';
-    const notes = opt.dataset.notes || '';
-    const stockIcon = {'In Stock':'✅','Low Stock':'🟡 Low Stock','Out of Stock':'🔴 Out of Stock — may be backordered','Backorder':'🟠 Currently on Backorder','Almost Gone':'⚠️ Almost Gone','Coming Soon':'🔵 Coming Soon','Orders Closed':'⛔ Orders Closed'}[stock] || '';
-    infoEl.innerHTML = [stockIcon ? `<span style="font-weight:700">${stockIcon}</span>` : '', notes ? `<span style="color:var(--muted);font-size:11px">${esc(notes)}</span>` : ''].filter(Boolean).join(' &nbsp;|&nbsp; ');
-    infoEl.style.display = (stockIcon || notes) ? 'flex' : 'none';
-  }
+  const nameEl = document.getElementById('po-item-name');
+  const idEl   = document.getElementById('po-part-id');
+  if (nameEl) nameEl.value = opt.value;
+  if (idEl)   idEl.value   = opt.dataset.partId || '';
 }
 
 function editPartOrderById(id) {
@@ -4496,57 +4573,93 @@ function editPartOrderById(id) {
 function submitPartOrder(e) {
   e.preventDefault();
   const r = Object.fromEntries(new FormData(e.target));
-  r.qty = parseInt(r.qty) || 1;
 
   if (partOrderEditing) {
+    r.qty = parseInt(r.qty) || 1;
     updateRow('partOrders', partOrderEditing.id, r);
     partOrderEditing = null;
     showToast('✅ Order updated');
-  } else {
-    // Save the order record first
-    const newId = uid();
-    const newOrder = {id: newId, createdAt: today(), ...r, status: r.status || 'ordered'};
-    if (!DB.partOrders) DB.partOrders = [];
-    DB.partOrders.unshift(newOrder);
-    saveDB('partOrders', newId);
     render();
-
-    // Open Gmail compose pre-filled to Stern Parts Sales
-    const qty       = r.qty || 1;
-    const partName  = r.itemName || '';
-    const partId    = r.partId || '';
-    const invNum    = r.invNumber ? `INV #${r.invNumber}` : '';
-    const notes     = r.notes || '';
-    const subject   = `Parts Order — ${partName}${partId ? ' ('+partId+')' : ''} × ${qty}`;
-    const body = [
-      `Hello Stern Parts Sales,`,
-      ``,
-      `Please process the following parts order for San Diego Amusements:`,
-      ``,
-      `Part Name:  ${partName}`,
-      partId ? `Part ID:    ${partId}` : '',
-      `Quantity:   ${qty}`,
-      r.unitCost ? `Unit Cost:  $${r.unitCost}` : '',
-      invNum ? `Reference:  ${invNum}` : '',
-      notes ? `Notes:      ${notes}` : '',
-      ``,
-      `Please confirm receipt of this order and provide an estimated ship date.`,
-      ``,
-      `Thank you,`,
-      `San Diego Amusements`,
-    ].filter(l => l !== null && l !== undefined).join('\n');
-
-    const gmailUrl = 'https://mail.google.com/mail/?view=cm'
-      + '&to=' + encodeURIComponent('Parts.Sales@sternpinball.com')
-      + '&su=' + encodeURIComponent(subject)
-      + '&body=' + encodeURIComponent(body);
-
-    const a = document.createElement('a');
-    a.href = gmailUrl; a.target = '_blank'; a.rel = 'noopener';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-
-    showToast('📧 Gmail opened — review and send your order to Stern!');
+    return;
   }
+
+  // ── NEW ORDER: collect all line items from the multi-line form ──
+  const lineRows = document.querySelectorAll('.po-line-row');
+  if (!lineRows.length) { showToast('Add at least one part to the order.', 'error'); return; }
+
+  const lineItems = [];
+  lineRows.forEach(row => {
+    const sel   = row.querySelector('.po-line-select');
+    const pidEl = row.querySelector('.po-line-partid');
+    const qtyEl = row.querySelector('.po-line-qty');
+    const name  = sel ? sel.options[sel.selectedIndex]?.value || '' : '';
+    const partId = pidEl ? pidEl.value.trim() : '';
+    const qty   = parseInt(qtyEl?.value || 1) || 1;
+    if (name) lineItems.push({ name, partId, qty });
+  });
+
+  if (!lineItems.length) { showToast('Add at least one part to the order.', 'error'); return; }
+
+  // Save each line item as a separate partOrder record
+  if (!DB.partOrders) DB.partOrders = [];
+  lineItems.forEach(item => {
+    const newId = uid();
+    DB.partOrders.unshift({
+      id: newId, createdAt: today(),
+      itemName: item.name,
+      partId: item.partId,
+      qty: item.qty,
+      orderDate: r.orderDate || today(),
+      invNumber: r.invNumber || '',
+      notes: r.notes || '',
+      status: 'ordered',
+      sternOrderNum: '', trackingNum: '', estArrival: '', receivedDate: '',
+    });
+    saveDB('partOrders', newId);
+  });
+
+  // ── Build email to Stern ──────────────────────────────────────
+  const invNum  = r.invNumber ? `Reference: INV #${r.invNumber}` : '';
+  const notes   = r.notes || '';
+  const orderDate = r.orderDate || today();
+
+  // Subject: list first part or count
+  const subjectPart = lineItems.length === 1
+    ? `${lineItems[0].name}${lineItems[0].partId ? ' ('+lineItems[0].partId+')' : ''}`
+    : `${lineItems.length} Parts`;
+  const subject = `Parts Order — ${subjectPart}`;
+
+  const itemLines = lineItems.map((item, i) =>
+    `${i+1}. ${item.name}${item.partId ? '  ('+item.partId+')' : ''}  ×  ${item.qty}`
+  ).join('\n');
+
+  const body = [
+    `Hello Stern Parts Sales,`,
+    ``,
+    `Please process the following parts order for San Diego Amusements:`,
+    ``,
+    `Order Date: ${orderDate}`,
+    ``,
+    itemLines,
+    ``,
+    invNum,
+    notes ? `Notes: ${notes}` : '',
+    ``,
+    `Thank you,`,
+    `San Diego Amusements`,
+  ].filter(l => l !== null && l !== undefined && l !== '').join('\n');
+
+  const gmailUrl = 'https://mail.google.com/mail/?view=cm'
+    + '&to=' + encodeURIComponent('Parts.Sales@sternpinball.com')
+    + '&su=' + encodeURIComponent(subject)
+    + '&body=' + encodeURIComponent(body);
+
+  const a = document.createElement('a');
+  a.href = gmailUrl; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+  render();
+  showToast(`📧 Gmail opened — ${lineItems.length} part${lineItems.length>1?'s':''} ordered!`);
 }
 
 function markPartOrderReceived(id) {
