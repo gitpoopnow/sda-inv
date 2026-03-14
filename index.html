@@ -5765,8 +5765,9 @@ async function _startApp(user) {
   // Check allow-list (if configured)
   const allowed = window._fbAllowed || [];
   if (allowed.length > 0 && !allowed.includes(user.email)) {
-    document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;font-family:system-ui,sans-serif;color:#e8eaf0;text-align:center"><div><p style="font-size:32px">🚫</p><p style="margin-top:12px">Access denied for <strong id="denied-email"></strong>.<br>Contact the admin to be added.</p><button id="denied-signout" style="margin-top:20px;background:#374151;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Sign out</button></div></div>`;
+    document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;font-family:system-ui,sans-serif;color:#e8eaf0;text-align:center"><div><p style="font-size:32px">🚫</p><p style="margin-top:12px">Access denied for <strong id="denied-email"></strong>.<br>Contact the admin to be added.</p><p style="margin-top:8px;font-size:11px;color:#6b7280">Signed in as: <span id="denied-email2" style="color:#f59e0b"></span></p><button id="denied-signout" style="margin-top:20px;background:#374151;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Sign out</button></div></div>`;
     document.getElementById('denied-email').textContent = user.email;
+    document.getElementById('denied-email2').textContent = user.email;
     document.getElementById('denied-signout').addEventListener('click', () => window._fbSignOut());
     return;
   }
