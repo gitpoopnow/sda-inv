@@ -31,8 +31,10 @@ try {
   console.warn('Firebase unavailable — local mode.', e.message);
   _auth = {
     onAuthStateChanged: (cb) => { setTimeout(() => cb(null), 0); return () => {}; },
-    signInWithPopup: () => Promise.reject(new Error('Firebase unavailable')),
-    signOut: () => Promise.resolve()
+    signInWithPopup:    () => Promise.reject(new Error('Firebase unavailable')),
+    signInWithRedirect: () => Promise.reject(new Error('Firebase unavailable')),
+    getRedirectResult:  () => Promise.resolve({ user: null }),
+    signOut:            () => Promise.resolve()
   };
   _db = null;
   _provider = null;
@@ -119,15 +121,16 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// iOS Safari blocks popups and has cookie issues with redirects.
-// Solution: always use redirect (most reliable across all mobile browsers)
-// but set prompt to 'select_account' to ensure it works even when already signed in.
+// Sign-in: redirect on mobile (iOS Safari blocks popups), popup on desktop
+// Guard setCustomParameters in case Firebase failed to load (_provider is null)
 const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-_provider.setCustomParameters({ prompt: 'select_account' });
+if (_provider) {
+  _provider.setCustomParameters({ prompt: 'select_account' });
+}
 window._fbSignIn = async () => {
+  if (!_auth || !_provider) throw new Error('Firebase unavailable');
   try {
     if (_isMobile) {
-      // iOS Safari: must use redirect — popups are always blocked
       return await _auth.signInWithRedirect(_provider);
     } else {
       return await _auth.signInWithPopup(_provider);
@@ -365,7 +368,7 @@ h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;lette
     <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
     <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
     <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-    <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
+    <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">—</span></div>
   </header>
   <main id="mc"></main>
 </div>
@@ -380,7 +383,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.34'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.35'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -5806,7 +5809,7 @@ async function _startApp(user) {
         <span id="sync-status" style="font-size:11px;font-weight:700;white-space:nowrap"></span>
         <span id="last-sync-time" style="font-size:10px;color:var(--muted);white-space:nowrap"></span>
         <button onclick="forceSyncNow()" title="Pull latest data from server" style="font-size:11px;padding:3px 8px;background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:4px;cursor:pointer">🔄 Sync</button>
-        <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">${typeof BUILD_VERSION!=='undefined'?BUILD_VERSION:'—'}</span></div>
+        <div class="dd" id="ddate" style="display:flex;align-items:center;gap:8px"><span id="ver-inline" style="font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.06em;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);border-radius:4px;padding:2px 6px">—</span></div>
       </header>
       <main id="mc"></main>
     </div>`;
