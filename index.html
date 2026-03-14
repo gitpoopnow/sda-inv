@@ -360,7 +360,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.60'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.61'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1110,12 +1110,12 @@ function renderInventory() {
       {id:'inv-tab-sold',      label:'✅ Sold',         status:'sold',       color:'var(--red)',    count:DB.inventory.filter(r=>r.status==='sold').length},
     ].map(t=>{
       const active = invFilters.invTab===t.status || (!invFilters.invTab && t.status==='in_stock');
-      return `<button id="${t.id}" onclick="invFilters.invTab='${t.status}';invFilters.status=${t.status==='_active'?`''`:`'${t.status}'`};invPage=0;renderInvTable()" style="padding:8px 16px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'};white-space:nowrap;flex-shrink:0">${t.label} (${t.count})</button>`;
+      return `<button id="${t.id}" onclick="invFilters.invTab='${t.status}';invFilters.status=${t.status==='_active'?`''`:`'${t.status}'`};invPage=0;render()" style="padding:8px 16px;font-size:12px;font-weight:700;border:none;cursor:pointer;border-radius:8px 8px 0 0;margin-right:2px;transition:background .15s;background:${active?t.color:'var(--panel2)'};color:${active?'#fff':'var(--muted)'};white-space:nowrap;flex-shrink:0">${t.label} (${t.count})</button>`;
     }).join('')}
   </div>
   <div class="filters">
     <input id="inv-search-input" placeholder="🔍 Search name, serial, location…" value="${invFilters.search}">
-    <select onchange="invFilters.section=this.value;invPage=0;renderInvTable()"><option value="">All Locations</option>${sections.map(s=>`<option${invFilters.section===s?' selected':''}>${s}</option>`).join('')}</select>
+    <select onchange="invFilters.section=this.value;invPage=0;render()"><option value="">All Locations</option>${sections.map(s=>`<option${invFilters.section===s?' selected':''}>${s}</option>`).join('')}</select>
   </div>
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${invEditing?'✏️ Edit':'➕ Add'} Inventory</h3>
