@@ -241,7 +241,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.15'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.16'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -619,6 +619,7 @@ function deleteSale(id) {
     if (!confirm('Delete this sale? This cannot be undone.')) return;
   }
   // Remove linked fulfillment
+  const linkedFulfillment = (DB.fulfillment||[]).filter(f => f.saleId === id);
   DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
   DB.sales = DB.sales.filter(s => s.id !== id);
   // Restore inventory item to in_stock — use inventoryId first, fallback to serial/name
@@ -630,9 +631,15 @@ function deleteSale(id) {
       );
   if (invItem) {
     const idx = DB.inventory.findIndex(i => i.id === invItem.id);
-    if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: ''};
+    if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: '', updatedAt: new Date().toISOString()};
   }
-  saveDB(); render();
+  saveDB();
+  // Delete from Firestore explicitly — saveDB() only saves, never deletes
+  if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+    window._fbDeleteRecord('sales', id).catch(e => console.warn('[SDA] delete sales error:', e));
+    linkedFulfillment.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA] delete fulfillment error:', e)));
+  }
+  render();
 }
 
 // ── NAV ───────────────────────────────────────────────────────
@@ -1825,7 +1832,8 @@ function moveToSold(r) {
     shippingCompany: r.shippingCompany||'', trackingNumber: r.trackingNumber||'',
     condition: 'New', cost: cost||'', margin, notes: r.notes||'',
   });
-  // Remove from sales table
+  // Remove from sales table — and delete from Firestore so it doesn't come back
+  const oldSaleId = r.id;
   DB.sales = (DB.sales||[]).filter(s => s.id !== r.id);
   // Mark inventory item as sold
   const invToMark = r.inventoryId
@@ -1833,9 +1841,13 @@ function moveToSold(r) {
     : (invRef || findInventoryMatch(r.machineName, r.serialNumber, 'reserved') || findInventoryMatch(r.machineName, r.serialNumber, 'in_stock'));
   if (invToMark) {
     const idx2 = DB.inventory.findIndex(i => i.id === invToMark.id);
-    if (idx2 !== -1) DB.inventory[idx2] = {...invToMark, status: 'sold', dateSold: r.saleDate||today()};
+    if (idx2 !== -1) DB.inventory[idx2] = {...invToMark, status: 'sold', dateSold: r.saleDate||today(), updatedAt: new Date().toISOString()};
   }
   saveDB();
+  // Explicitly delete old sales record from Firestore — it's now in sold collection
+  if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+    window._fbDeleteRecord('sales', oldSaleId).catch(e => console.warn('[SDA] delete old sale error:', e));
+  }
   salesView = 'sold';
   goto('sales');
 }
@@ -2213,9 +2225,16 @@ function deleteSold(id) {
     }
   }
   // Remove linked fulfillment record
+  const linkedFulfillment2 = (DB.fulfillment||[]).filter(f => f.saleId === id);
   DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
   DB.sold = DB.sold.filter(s => s.id !== id);
-  saveDB(); render();
+  saveDB();
+  // Delete from Firestore explicitly — saveDB() only saves, never deletes
+  if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+    window._fbDeleteRecord('sold', id).catch(e => console.warn('[SDA] delete sold error:', e));
+    linkedFulfillment2.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA] delete fulfillment error:', e)));
+  }
+  render();
   showToast('Sale deleted — customer info moved to Active Sales');
 }
 
@@ -2255,10 +2274,17 @@ function revertSaleToInventory(id) {
     }
   }
   // Remove linked fulfillment
+  const linkedFulfillment3 = (DB.fulfillment||[]).filter(f => f.saleId === id);
   DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
   // Remove the sold record
   DB.sold = DB.sold.filter(s => s.id !== id);
-  saveDB(); render();
+  saveDB();
+  // Delete from Firestore explicitly — saveDB() only saves, never deletes
+  if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+    window._fbDeleteRecord('sold', id).catch(e => console.warn('[SDA] delete sold error:', e));
+    linkedFulfillment3.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA] delete fulfillment error:', e)));
+  }
+  render();
   showToast('↩ Sale reverted — item back in inventory');
 }
 
