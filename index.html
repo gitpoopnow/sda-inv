@@ -121,27 +121,15 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// Sign-in: redirect on mobile (iOS Safari blocks popups), popup on desktop
-// Guard setCustomParameters in case Firebase failed to load (_provider is null)
+// Use popup for all devices — redirect breaks on iOS Safari + GitHub Pages due to ITP cookie blocking.
+// Button is disabled on first tap to prevent double-tap cancellation errors.
 const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 if (_provider) {
   _provider.setCustomParameters({ prompt: 'select_account' });
 }
 window._fbSignIn = async () => {
   if (!_auth || !_provider) throw new Error('Firebase unavailable');
-  try {
-    if (_isMobile) {
-      return await _auth.signInWithRedirect(_provider);
-    } else {
-      return await _auth.signInWithPopup(_provider);
-    }
-  } catch(e) {
-    // If popup fails for any reason, fall back to redirect
-    if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request' || e.code === 'auth/popup-closed-by-user') {
-      return await _auth.signInWithRedirect(_provider);
-    }
-    throw e;
-  }
+  return await _auth.signInWithPopup(_provider);
 };
 window._fbSignOut  = () => {
   // Clear local cache on sign-out so business data doesn't persist on shared computers
@@ -364,7 +352,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.36'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.39'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -2500,9 +2488,20 @@ function revertSaleToInventory(id) {
 let partsEditing = null;
 function renderParts() {
   const rec = partsEditing||{};
+
+  // Count how many parts have missing cost or msrp that could be filled from catalog
+  const syncable = (DB.parts||[]).filter(p => {
+    if (!p.partId) return false;
+    const match = STERN_KNOWN_PARTS.find(k => k.id && k.id.trim() === (p.partId||'').trim());
+    return match && ((!p.cost && match.cost) || (!p.msrp && match.msrp));
+  }).length;
+
   return `
   <h1 class="pt">Parts / Accessories</h1>
-  <input placeholder="🔍 Search parts, part IDs, game, notes…" oninput="filterTbl('parts-tbody','parts',this.value,['itemName','partId','game','notes','invNumbers'])" style="border-radius:9px;padding:8px 14px;margin-bottom:12px;width:100%;max-width:420px">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <input placeholder="🔍 Search parts, part IDs, game, notes…" oninput="filterTbl('parts-tbody','parts',this.value,['itemName','partId','game','notes','invNumbers'])" style="border-radius:9px;padding:8px 14px;flex:1;min-width:200px">
+    ${syncable > 0 ? `<button class="btn ghost" style="font-size:12px;white-space:nowrap" onclick="syncPartsFromCatalog()">📋 Sync Prices from Catalog (${syncable} parts)</button>` : `<button class="btn ghost" style="font-size:12px;white-space:nowrap;opacity:.5" onclick="syncPartsFromCatalog()">📋 Sync Prices from Catalog</button>`}
+  </div>
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${partsEditing?'✏️ Edit':'➕ Add'} Part / Accessory</h3>
     <form onsubmit="submitParts(event)">
@@ -2578,6 +2577,39 @@ function submitParts(e) {
   r.onHand = Number(r.startQty||0)+Number(r.addedQty||0)-Number(r.soldQty||0);
   if (r.onHand < 0 && !confirm(`Warning: On Hand will be ${r.onHand} (negative). Continue?`)) return;
   if(partsEditing){updateRow('parts',partsEditing.id,r);partsEditing=null;}else addRow('parts',r);
+}
+
+function syncPartsFromCatalog() {
+  if (!DB.parts || !DB.parts.length) { showToast('No parts in inventory to sync.'); return; }
+  const ts = new Date().toISOString();
+  let updated = 0;
+  let skipped = 0;
+
+  DB.parts.forEach((p, idx) => {
+    if (!p.partId) return;
+    const match = STERN_KNOWN_PARTS.find(k => k.id && k.id.trim() === p.partId.trim());
+    if (!match) return;
+
+    const changes = {};
+    // Only fill in missing values — never overwrite existing ones
+    if (!p.cost && match.cost)   changes.cost = match.cost;
+    if (!p.msrp && match.msrp)   changes.msrp = match.msrp;
+    if (!p.game && match.game)   changes.game = match.game;
+    if (!p.stockStatus && match.stockStatus) changes.stockStatus = match.stockStatus;
+
+    if (Object.keys(changes).length === 0) { skipped++; return; }
+
+    DB.parts[idx] = {...p, ...changes, updatedAt: ts};
+    saveDB('parts', p.id);
+    updated++;
+  });
+
+  render();
+  if (updated > 0) {
+    showToast(`✅ Synced prices for ${updated} part${updated>1?'s':''} from catalog${skipped?' ('+skipped+' already had prices)':''}`);
+  } else {
+    showToast('All parts already have prices — nothing to update.');
+  }
 }
 
 // ── LOCATIONS ─────────────────────────────────────────────────
@@ -5739,13 +5771,14 @@ async function forceSyncNow() {
 
 // ── LOGIN SCREEN ──────────────────────────────────────────────
 function _showLoginScreen() {
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   document.body.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;font-family:system-ui,sans-serif;">
       <div style="background:#11141c;border:1px solid #1e2535;border-radius:16px;padding:48px 40px;text-align:center;max-width:360px;width:100%">
         <div style="font-size:32px;margin-bottom:8px">🕹️</div>
         <h1 style="color:#e8eaf0;font-size:22px;font-weight:900;margin-bottom:4px">SDA Pinball</h1>
         <p style="color:#6b7280;font-size:13px;margin-bottom:32px">Inventory Management</p>
-        <button onclick="if(!window._fbSignIn){document.getElementById('login-err').textContent='Still loading, please wait a moment and try again';return;}window._fbSignIn().catch(e=>document.getElementById('login-err').textContent=e.message)"
+        <button id="login-btn"
           style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
           <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg>
           Sign in with Google
@@ -5754,6 +5787,22 @@ function _showLoginScreen() {
         <p style="color:#374151;font-size:11px;margin-top:24px">Access restricted to authorized accounts.</p>
       </div>
     </div>`;
+
+  // Bind directly — synchronous tap handler required for iOS Safari popup/redirect
+  document.getElementById('login-btn').addEventListener('click', function() {
+    const errEl = document.getElementById('login-err');
+    if (!window._fbSignIn) {
+      if (errEl) errEl.textContent = 'Still loading, please wait a moment and try again';
+      return;
+    }
+    this.disabled = true;
+    this.textContent = 'Signing in…';
+    window._fbSignIn().catch(e => {
+      this.disabled = false;
+      this.innerHTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg> Sign in with Google';
+      if (errEl) errEl.textContent = e.message;
+    });
+  });
 }
 
 // ── AUTH-GATED APP STARTUP ─────────────────────────────────────
@@ -5832,24 +5881,6 @@ async function init() {
     if (!window._fbReady) {
       document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;color:#ef4444;font-family:system-ui">Firebase failed to load. Check your internet connection and reload the page.</div>';
       return;
-    }
-  }
-
-  // On mobile, check for completed redirect sign-in BEFORE handling auth state
-  const _isMobileInit = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  if (_isMobileInit && _auth) {
-    try {
-      const result = await _auth.getRedirectResult();
-      if (result && result.user) {
-        await _startApp(result.user);
-        return;
-      }
-    } catch(e) {
-      if (e.code !== 'auth/no-auth-event' && e.code !== 'auth/null-user') {
-        console.warn('[SDA] Redirect result error:', e.message);
-        const errEl = document.getElementById('login-err');
-        if (errEl) errEl.textContent = e.message;
-      }
     }
   }
 
