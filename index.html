@@ -352,7 +352,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.49'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.50'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -893,6 +893,14 @@ function selectGame(gid, pickerId, serialId) {
 
 // ── SALE GAME PICKER (title-first, then serial) ────────────────
 function salePickerHtml(machineName='', serialNumber='', inventoryId='') {
+  // Get location info for selected machine
+  const invRef = inventoryId
+    ? (DB.inventory||[]).find(i => i.id === inventoryId)
+    : machineName
+      ? (DB.inventory||[]).find(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === machineName.toLowerCase().trim())
+      : null;
+  const locationBadge = invRef ? getSaleLocationBadge(invRef) : '';
+
   return `<div style="grid-column:1/-1">
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">
       <div class="pw" id="pw-sale-title" style="position:relative">
@@ -901,6 +909,7 @@ function salePickerHtml(machineName='', serialNumber='', inventoryId='') {
           placeholder="Type game title…"
           oninput="saleTitleSearch()" onfocus="saleTitleSearch()" autocomplete="off">
         <div class="pdrop" id="pd-sale-title"></div>
+        <div id="sale-location-badge" style="margin-top:5px;min-height:20px">${locationBadge}</div>
       </div>
       <div id="sale-serial-wrap">
         <label class="fl">SERIAL NUMBER</label>
@@ -915,6 +924,22 @@ function salePickerHtml(machineName='', serialNumber='', inventoryId='') {
       </div>
     </div>
   </div>`;
+}
+
+function getSaleLocationBadge(inv) {
+  if (!inv) return '';
+  const loc = inv.location || inv.section || '';
+  const status = inv.status || '';
+  // Color by location/status
+  const locLower = loc.toLowerCase();
+  let color = 'var(--muted)';
+  let icon = '📍';
+  if (locLower.includes('bdk') || locLower.includes('barn') || locLower.includes('storage')) { color='var(--orange)'; icon='🏚️'; }
+  else if (locLower.includes('warehouse') || locLower.includes('ware')) { color='var(--accent)'; icon='🏭'; }
+  else if (locLower.includes('showroom') || locLower.includes('floor')) { color='var(--green)'; icon='🏪'; }
+  else if (status === 'pre_order') { color='var(--purple)'; icon='📋'; }
+  const label = loc || (status === 'pre_order' ? 'Pre-Order' : status || 'Unknown location');
+  return `<span style="font-size:11px;font-weight:700;color:${color};display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(0,0,0,.2);border-radius:5px;border:1px solid currentColor">${icon} ${esc(label)}</span>`;
 }
 
 function saleBuildSerialOptions(machineName, selectedSerial) {
@@ -971,11 +996,17 @@ function onSaleTitleSelect(machineName) {
   // Rebuild serial dropdown for this title
   const sel = document.getElementById('sale-serial-select');
   if(sel) sel.innerHTML = saleBuildSerialOptions(machineName, '');
-  // Auto-select if only one option
+  // Auto-select if only one real (non-TBD) option
   const sel2 = document.getElementById('sale-serial-select');
-  // Auto-select serial if only one real (non-TBD) option
   if(sel2) { const realOpts = Array.from(sel2.options).filter(o=>o.value&&o.value!=="TBD"); if(realOpts.length===1) { sel2.value=realOpts[0].value; } }
   onSerialSelectChange();
+  // Update location badge
+  const badge = document.getElementById('sale-location-badge');
+  if (badge) {
+    const mn = machineName.toLowerCase().trim();
+    const invRef = (DB.inventory||[]).find(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn);
+    badge.innerHTML = invRef ? getSaleLocationBadge(invRef) : '';
+  }
 }
 
 function onSerialSelectChange() {
@@ -1520,7 +1551,18 @@ function renderSales() {
         <div class="fw"><label class="fl">SALE PRICE ($)</label><input type="number" step="0.01" name="salePrice" value="${rec.salePrice||''}"></div>
         <div class="fw"><label class="fl">SALE DATE</label><input type="date" name="saleDate" value="${rec.saleDate||''}"></div>
         <div class="fw"><label class="fl">STATUS</label><select name="status">${['open','closed','pending','pend payment','cancelled'].map(o=>`<option${(rec.status||'open')===o?' selected':''}>${o}</option>`).join('')}</select></div>
-        <div class="fw"><label class="fl">PAYMENT</label><input name="paymentStatus" list="dl-pay-sales" value="${rec.paymentStatus||''}" placeholder="PIF, ACH, CASH…"><datalist id="dl-pay-sales"><option value="PIF"><option value="DEP"><option value="PEND PYMN"><option value="ACH"><option value="CASH"><option value="Shopify"><option value="TRADE"></datalist></div>
+        <div class="fw">
+          <label class="fl">PAYMENT TYPE</label>
+          <select name="paymentStatus">
+            ${['','ACH','CASH','CHECK','Shopify','TRADE','WIRE'].map(o=>`<option value="${o}"${(rec.paymentStatus||'')=== o?' selected':''}>${o||'— Select —'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fw">
+          <label class="fl">PAYMENT STATUS</label>
+          <select name="paymentStage">
+            ${['','Paid in Full','Deposit','Hold','Partial','Pending','Refunded'].map(o=>`<option value="${o}"${(rec.paymentStage||'')=== o?' selected':''}>${o||'— Select —'}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <!-- Additional Games -->
       <div id="additional-games-wrap" style="margin-top:10px">
@@ -1653,7 +1695,7 @@ function renderSales() {
   <h3 class="st" style="margin-bottom:8px">ACTIVE SALES (${(DB.sales||[]).length})</h3>
   <input placeholder="🔍 Search active sales…" oninput="filterTbl('sale-tbody','sales',this.value,['machineName','customerName','serialNumber','businessName'])" style="border-radius:9px;padding:8px 14px;margin-bottom:10px">
   <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
-    <thead><tr><th>MACHINE</th><th>SERIAL</th><th>CUSTOMER</th><th class="m">BUSINESS</th><th class="m">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th>DATE</th><th>PAYMENT</th><th>CARRIER</th><th>TRACKING</th><th>STATUS</th><th></th></tr></thead>
+    <thead><tr><th>MACHINE</th><th>SERIAL</th><th>CUSTOMER</th><th class="m">BUSINESS</th><th class="m">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th>DATE</th><th>PAYMENT</th><th>PAY STATUS</th><th>CARRIER</th><th>TRACKING</th><th>STATUS</th><th></th></tr></thead>
     <tbody id="sale-tbody">${(DB.sales||[]).map(r=>`<tr>
       <td style="font-weight:600">${r.machineName}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted);font-weight:400">+ ${g.machineName}</span>`).join('<br>')}`:''}</td>
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted)">${g.serialNumber||'—'}</span>`).join('<br>')}`:''}</td>
@@ -1662,7 +1704,8 @@ function renderSales() {
       <td class="m">${esc(r.invNumber)||'—'}</td>
       <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
       <td class="m">${r.saleDate||'—'}</td>
-      <td>${r.paymentStatus?`<span class="badge bg-orange">${r.paymentStatus}</span>`:'—'}</td>
+      <td>${r.paymentStatus?`<span class="badge bg-orange">${esc(r.paymentStatus)}</span>`:'—'}</td>
+      <td>${r.paymentStage?`<span class="badge ${payStageMap[r.paymentStage]||'bg-blue'}" style="font-size:10px">${esc(r.paymentStage)}</span>`:'—'}</td>
       <td class="m">${r.shippingCompany||'—'}</td>
       <td>${r.trackingLink?`<a href="${r.trackingLink}" target="_blank">${r.trackingNumber||'Link ↗'}</a>`:(r.trackingNumber||'—')}</td>
       <td>${badge(r.status,statusBadge)}</td>
@@ -1983,7 +2026,7 @@ function moveToSold(r) {
     customerAddress: r.customerAddress||'', customerCity: r.customerCity||'', customerState: r.customerState||'',
     customerZip: r.customerZip||'', customerType: r.customerType||'', liftgate: r.liftgate||'',
     salePrice: r.salePrice||'', dateSold: r.saleDate||today(),
-    invNumber: r.invNumber||'', paymentStatus: r.paymentStatus||'PIF',
+    invNumber: r.invNumber||'', paymentStatus: r.paymentStatus||'PIF', paymentStage: r.paymentStage||'',
     shippingCompany: r.shippingCompany||'', trackingNumber: r.trackingNumber||'',
     condition: 'New', cost: cost||'', margin, notes: r.notes||'',
   });
@@ -2355,7 +2398,7 @@ function deleteSold(id) {
     salePrice: sale.salePrice || '',
     dateSold: sale.dateSold || '',
     invNumber: sale.invNumber || '',
-    paymentStatus: sale.paymentStatus || '',
+    paymentStatus: sale.paymentStatus || '', paymentStage: sale.paymentStage || '',
     shippingCompany: sale.shippingCompany || '',
     trackingNumber: sale.trackingNumber || '',
     condition: sale.condition || '',
@@ -2416,7 +2459,7 @@ function revertSaleToInventory(id) {
     salePrice: sale.salePrice || '',
     saleDate: sale.dateSold || '',
     status: 'pending',
-    paymentStatus: sale.paymentStatus || '',
+    paymentStatus: sale.paymentStatus || '', paymentStage: sale.paymentStage || '',
     customerName: sale.customerName || '',
     businessName: sale.businessName || '',
     customerEmail: sale.customerEmail || '',
@@ -2756,6 +2799,7 @@ function filterTbl(id,table,q,keys) {
 let psEditing = null;
 let psSearch = '';
 const payBadgeMap = {PIF:'bg-green', DEP:'bg-yellow', 'PEND PYMN':'bg-red', TRADE:'bg-purple', UNKNOWN:'bg-orange'};
+const payStageMap = {'Paid in Full':'bg-green','Deposit':'bg-yellow','Hold':'bg-orange','Partial':'bg-yellow','Pending':'bg-red','Refunded':'bg-purple'};
 
 function renderPendingSales() {
   const all = DB.pendingSales || [];
@@ -3081,7 +3125,7 @@ function psToSold(r) {
     customerAddress: r.customerAddress||'', customerCity: r.customerCity||'', customerState: r.customerState||r.state||'',
     customerZip: r.customerZip||'', customerType: r.customerType||'', liftgate: r.liftgate||'',
     salePrice: r.price||'', dateSold: soldDate,
-    invNumber: r.invNumber||'', paymentStatus: r.paymentStatus||'PIF',
+    invNumber: r.invNumber||'', paymentStatus: r.paymentStatus||'PIF', paymentStage: r.paymentStage||'',
     shippingCompany:'', trackingNumber:'',
     condition:'New', cost, margin, notes: r.notes||'',
   });
@@ -3094,7 +3138,7 @@ function psToSold(r) {
     customerAddress: r.customerAddress||'', customerCity: r.customerCity||'', customerState: r.customerState||r.state||'',
     customerZip: r.customerZip||'', customerType: r.customerType||'', liftgate: r.liftgate||'',
     machineName: r.gameName||'', serialNumber: invRef ? invRef.serialNumber||'' : '',
-    invNumber: r.invNumber||'', method: 'shipping', status: 'pending',
+    invNumber: r.invNumber||'', paymentStage: r.paymentStage||'', method: 'shipping', status: 'pending',
     carrier: '', trackingNumber: '', trackingLink: '', scheduledDate: '', notes: r.notes||'',
   });
   // Update inventory status to sold
@@ -3650,6 +3694,7 @@ const FULFIL_COLS = [
     return billLine;
   }},
   {k:'liftgate',      l:'GATE',       m:1, w:'55px'},
+  {k:'paymentStage',  l:'PAY STATUS', m:1, w:'80px', badge:{'Paid in Full':'bg-green','Deposit':'bg-yellow','Hold':'bg-orange','Partial':'bg-yellow','Pending':'bg-red','Refunded':'bg-purple'}},
   {k:'machineName',   l:'MACHINE',    w:'120px'},
   {k:'invNumber',     l:'INV#',       m:1, w:'52px'},
   {k:'carrier',       l:'CARRIER',    w:'88px',  nowrap:true},
@@ -3782,6 +3827,16 @@ function renderFulfillment() {
     <div class="fw" style="max-width:120px"><label class="fl">ZIP</label><input name="customerZip" value="${esc(s.customerZip||'')}" oninput="fulfillmentFieldChanged()"></div>
     <div class="fw"><label class="fl">TYPE</label><select name="customerType" onchange="fulfillmentFieldChanged()"><option value="">—</option>${['Residential','Business'].map(o=>`<option${(s.customerType||'')===o?' selected':''}>${o}</option>`).join('')}</select></div>
     <div class="fw"><label class="fl">LIFTGATE</label><input name="liftgate" list="dl-liftgate" value="${esc(s.liftgate||'')}" placeholder="Type or choose…" oninput="fulfillmentFieldChanged()"><datalist id="dl-liftgate"><option value="Yes"><option value="No"><option value="Yes - Residential"><option value="Yes - Business"><option value="No - Has Dock"></datalist></div>
+    <div class="fw"><label class="fl">PAYMENT TYPE</label>
+      <select name="paymentStatus" onchange="fulfillmentFieldChanged()">
+        ${['','ACH','CASH','CHECK','Shopify','TRADE','WIRE'].map(o=>`<option value="${o}"${(s.paymentStatus||'')=== o?' selected':''}>${o||'— Select —'}</option>`).join('')}
+      </select>
+    </div>
+    <div class="fw"><label class="fl">PAYMENT STATUS</label>
+      <select name="paymentStage" onchange="fulfillmentFieldChanged()">
+        ${['','Paid in Full','Deposit','Hold','Partial','Pending','Refunded'].map(o=>`<option value="${o}"${(s.paymentStage||'')=== o?' selected':''}>${o||'— Select —'}</option>`).join('')}
+      </select>
+    </div>
 
     ${shipToBlock}
 
