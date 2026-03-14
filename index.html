@@ -250,7 +250,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.19'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.20'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -2282,11 +2282,44 @@ function deleteSold(id) {
 function revertSaleToInventory(id) {
   const sale = (DB.sold||[]).find(s => s.id === id);
   if (!sale) return;
-  if (!confirm(`Revert "${sale.machineName || 'this sale'}" back to inventory as In Stock?\n\nThis will:\n• Remove the sold record\n• Set inventory status back to In Stock\n• Remove the linked fulfillment record`)) return;
+  if (!confirm(`Revert "${sale.machineName || 'this sale'}" back to Active Sales?\n\nThis will:\n• Move the record back to Active Sales\n• Set inventory status back to Reserved\n• Remove the sold record`)) return;
 
   const ts = new Date().toISOString();
+  const newSaleId = uid();
 
-  // Restore inventory item to in_stock
+  // Move back to Active Sales with all customer info intact
+  if (!DB.sales) DB.sales = [];
+  DB.sales.unshift({
+    id: newSaleId,
+    createdAt: sale.createdAt || today(),
+    updatedAt: ts,
+    inventoryId: sale.inventoryId || '',
+    machineName: sale.machineName || '',
+    serialNumber: sale.serialNumber || '',
+    shopifyOrderNum: sale.shopifyOrderNum || '',
+    invNumber: sale.invNumber || '',
+    salePrice: sale.salePrice || '',
+    saleDate: sale.dateSold || '',
+    status: 'pending',
+    paymentStatus: sale.paymentStatus || '',
+    customerName: sale.customerName || '',
+    businessName: sale.businessName || '',
+    customerEmail: sale.customerEmail || '',
+    customerPhone: sale.customerPhone || '',
+    customerType: sale.customerType || '',
+    customerAddress: sale.customerAddress || '',
+    customerCity: sale.customerCity || '',
+    customerState: sale.customerState || '',
+    customerZip: sale.customerZip || '',
+    liftgate: sale.liftgate || '',
+    shippingCompany: sale.shippingCompany || '',
+    trackingNumber: sale.trackingNumber || '',
+    trackingLink: sale.trackingLink || '',
+    shippingStatus: 'pending',
+    notes: sale.notes || '',
+  });
+
+  // Restore inventory item to reserved (it was sold, now it's back to active sale)
   const invItem = sale.inventoryId
     ? (DB.inventory||[]).find(i => i.id === sale.inventoryId)
     : (DB.inventory||[]).find(i =>
@@ -2296,36 +2329,44 @@ function revertSaleToInventory(id) {
   if (invItem) {
     const idx = DB.inventory.findIndex(i => i.id === invItem.id);
     if (idx !== -1) {
-      DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: '', updatedAt: ts};
-    }
-  } else {
-    // No linked inventory found — offer to create one
-    if (confirm('No linked inventory item found. Add it back to inventory as a new In Stock item?')) {
-      DB.inventory.unshift({
-        id: uid(), createdAt: today(), updatedAt: ts,
-        machineName: sale.machineName || '',
-        serialNumber: sale.serialNumber || '',
-        status: 'in_stock',
-        cost: sale.cost || '',
-        condition: sale.condition || 'Used',
-        section: 'NEW SHOWROOM', location: '', notes: '',
-        dateReceived: today(), dateSold: '',
-      });
+      DB.inventory[idx] = {...invItem, status: 'reserved', dateSold: '', updatedAt: ts};
     }
   }
-  // Remove linked fulfillment
+
+  // Move fulfillment record to point to new sale id
   const linkedFulfillment3 = (DB.fulfillment||[]).filter(f => f.saleId === id);
-  DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
+  if (linkedFulfillment3.length > 0) {
+    linkedFulfillment3.forEach(f => {
+      const fidx = DB.fulfillment.findIndex(ff => ff.id === f.id);
+      if (fidx !== -1) DB.fulfillment[fidx] = {...f, saleId: newSaleId, status: 'pending', updatedAt: ts};
+    });
+  } else {
+    // No fulfillment — create one for the new sale
+    DB.fulfillment.unshift({
+      id: uid(), createdAt: today(), saleId: newSaleId,
+      inventoryId: sale.inventoryId || '',
+      customerName: sale.customerName || '', businessName: sale.businessName || '',
+      customerEmail: sale.customerEmail || '', customerPhone: sale.customerPhone || '',
+      customerAddress: sale.customerAddress || '', customerCity: sale.customerCity || '',
+      customerState: sale.customerState || '', customerZip: sale.customerZip || '',
+      customerType: sale.customerType || '', liftgate: sale.liftgate || '',
+      machineName: sale.machineName || '', serialNumber: sale.serialNumber || '',
+      invNumber: sale.invNumber || '', method: 'shipping', status: 'pending',
+      carrier: sale.shippingCompany || '', trackingNumber: sale.trackingNumber || '',
+      trackingLink: sale.trackingLink || '', scheduledDate: '', notes: sale.notes || '',
+    });
+  }
+
   // Remove the sold record
   DB.sold = DB.sold.filter(s => s.id !== id);
   saveDB();
-  // Delete from Firestore explicitly — saveDB() only saves, never deletes
+  // Delete old sold record from Firestore
   if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
     window._fbDeleteRecord('sold', id).catch(e => console.warn('[SDA] delete sold error:', e));
-    linkedFulfillment3.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA] delete fulfillment error:', e)));
   }
+  salesView = 'active';
   render();
-  showToast('↩ Sale reverted — item back in inventory');
+  showToast('↩ Sale reverted — moved back to Active Sales');
 }
 
 
