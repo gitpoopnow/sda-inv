@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none'; base-uri 'self'; form-action 'self'; connect-src 'self' https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.googleapis.com https://script.google.com https://script.googleusercontent.com wss://*.firebaseio.com;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SDA Pinball Inventory</title>
 <!-- Firebase SDK (compat mode - no module imports needed) -->
@@ -119,7 +120,11 @@ window._fbWatchCollection = (col, cb) => {
 };
 
 window._fbSignIn   = () => _auth.signInWithPopup(_provider);
-window._fbSignOut  = () => _auth.signOut();
+window._fbSignOut  = () => {
+  // Clear local cache on sign-out so business data doesn't persist on shared computers
+  try { localStorage.removeItem(LOCAL_KEY); } catch(e) {}
+  return _auth.signOut();
+};
 window._fbAllowed  = ALLOWED_EMAILS;
 window._fbReady    = true;
 
@@ -245,7 +250,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.18'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.19'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -833,11 +838,14 @@ function saleTitleSearch() {
   if(!titles.length){drop.classList.remove('open');return;}
   drop.innerHTML = titles.slice(0,20).map(g => {
     const count = allActive.filter(i=>(i.machineName||'').toLowerCase().trim()===(g.machineName||'').toLowerCase().trim()).length;
-    return `<div class="pi" onclick="onSaleTitleSelect('${g.machineName.replace(/'/g,"\\'")}')" >
-      <span class="pi-name">${g.machineName}</span>
+    return `<div class="pi sale-title-opt" data-machine="${esc(g.machineName)}">
+      <span class="pi-name">${esc(g.machineName)}</span>
       <span class="pi-ser">${count} unit${count!==1?'s':''} in stock</span>
     </div>`;
   }).join('');
+  drop.querySelectorAll('.sale-title-opt').forEach(el => {
+    el.addEventListener('click', () => onSaleTitleSelect(el.dataset.machine || ''));
+  });
   drop.classList.add('open');
 }
 
@@ -907,11 +915,11 @@ function renderDashboard() {
   <div class="two">
     <div class="panel">
       <h3 class="st">RECENT INVENTORY <span style="cursor:pointer;color:var(--accent);font-weight:700;font-size:11px" onclick="goto('inventory',{status:''})">View all →</span></h3>
-      ${inv.slice(0,8).map(g=>`<div class="rr" style="cursor:pointer" onclick="goto('inventory',{search:'${g.machineName.replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''"><span style="font-weight:600;font-size:13px">${g.machineName}</span><span class="badge ${g.status==='in_stock'?'bg-green':g.status==='sold'?'bg-red':'bg-purple'}">${g.status}</span></div>`).join('')}
+      ${inv.slice(0,8).map(g=>`<div class="rr" style="cursor:pointer" data-search="${esc(g.machineName)}" onclick="goto('inventory',{search:this.dataset.search})" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''"><span style="font-weight:600;font-size:13px">${esc(g.machineName)}</span><span class="badge ${g.status==='in_stock'?'bg-green':g.status==='sold'?'bg-red':'bg-purple'}">${esc(g.status)}</span></div>`).join('')}
     </div>
     <div class="panel">
       <h3 class="st">RECENT SALES <span style="cursor:pointer;color:var(--accent);font-weight:700;font-size:11px" onclick="goto('sales')">View all →</span></h3>
-      ${(DB.sales||[]).slice(0,8).map(s=>`<div class="rr" style="cursor:pointer" onclick="goto('sales')" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''"><span style="font-weight:600;font-size:13px">${s.machineName}</span><div style="display:flex;gap:6px;align-items:center">${s.paymentStatus?`<span class="badge bg-orange">${s.paymentStatus}</span>`:''}<span style="color:var(--green);font-weight:700">${s.salePrice?'$'+Number(s.salePrice).toLocaleString():''}</span></div></div>`).join('')||'<div class="empty">No sales yet.</div>'}
+      ${(DB.sales||[]).slice(0,8).map(s=>`<div class="rr" style="cursor:pointer" onclick="goto('sales')" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''"><span style="font-weight:600;font-size:13px">${esc(s.machineName)}</span><div style="display:flex;gap:6px;align-items:center">${s.paymentStatus?`<span class="badge bg-orange">${esc(s.paymentStatus)}</span>`:''}<span style="color:var(--green);font-weight:700">${s.salePrice?'$'+Number(s.salePrice).toLocaleString():''}</span></div></div>`).join('')||'<div class="empty">No sales yet.</div>'}
     </div>
   </div>`;
 }
@@ -2578,7 +2586,7 @@ function renderPendingSales() {
           <span class="badge ${payBadgeMap[r.paymentStatus]||'bg-blue'}" style="font-size:10px">${r.paymentStatus||'—'}</span>
           <button class="btn sm success" data-ps-id="${r.id}" onclick="editPSById(this.dataset.psId,true)" title="Mark Sold">→ Sold</button>
           <button class="btn sm ghost" data-ps-id="${r.id}" onclick="editPSById(this.dataset.psId,false)" title="Edit">✏️</button>
-          ${otherGames.length ? `<button class="btn sm ghost" title="Move to another game" style="font-size:11px" onclick="promptMoveCustomer('${r.id}','${(r.customerName||'').replace(/'/g,"\\'")}','${game.replace(/'/g,"\\'")}')">↪</button>` : ''}
+          ${otherGames.length ? `<button class="btn sm ghost" title="Move to another game" style="font-size:11px" data-order-id="${esc(r.id)}" data-cust="${esc(r.customerName||'')}" data-game="${esc(game)}" onclick="promptMoveCustomer(this.dataset.orderId,this.dataset.cust,this.dataset.game)">↪</button>` : ''}
           <button class="btn sm ghost" onclick="moveOrderInGame('${r.id}',-1)" title="Move up" style="font-size:10px;padding:2px 5px">▲</button>
           <button class="btn sm ghost" onclick="moveOrderInGame('${r.id}',1)" title="Move down" style="font-size:10px;padding:2px 5px">▼</button>
           <button class="btn sm danger" onclick="delRow('pendingSales','${r.id}')" title="Delete">✕</button>
@@ -2588,15 +2596,15 @@ function renderPendingSales() {
 
     return `<div class="panel" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <div style="font-size:14px;font-weight:900;flex:1">${game}</div>
+        <div style="font-size:14px;font-weight:900;flex:1">${esc(game)}</div>
         <div style="display:flex;gap:5px;align-items:center;flex-shrink:0">
           <span style="font-size:11px;color:var(--muted);font-weight:600">${customers.length}</span>
           ${gamePif  ? `<span class="badge bg-green" style="font-size:10px">${gamePif} PIF</span>` : ''}
           ${gameDep  ? `<span class="badge bg-yellow" style="font-size:10px">${gameDep} DEP</span>` : ''}
           ${gamePend ? `<span class="badge bg-red" style="font-size:10px">${gamePend} PEND</span>` : ''}
           ${gameOther ? `<span class="badge bg-orange" style="font-size:10px">${gameOther}</span>` : ''}
-          <button class="btn sm ghost" style="font-size:11px;padding:3px 7px" title="Rename game category" onclick="renameGame('${game.replace(/'/g,"\\'")}')">✏️ Rename</button>
-          <button class="btn sm ghost" style="font-size:11px;padding:3px 7px" onclick="psEditing={gameName:'${game.replace(/'/g,"\\'")}',forceGame:true};render();window.scrollTo(0,0)">+ Add</button>
+          <button class="btn sm ghost" style="font-size:11px;padding:3px 7px" title="Rename game category" data-game="${esc(game)}" onclick="renameGame(this.dataset.game)">✏️ Rename</button>
+          <button class="btn sm ghost" style="font-size:11px;padding:3px 7px" data-game="${esc(game)}" onclick="psEditing={gameName:this.dataset.game,forceGame:true};render();window.scrollTo(0,0)">+ Add</button>
         </div>
       </div>
       ${custRows}
