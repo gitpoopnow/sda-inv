@@ -229,6 +229,10 @@ h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;lette
 .tbl-wrap{overflow-x:auto}
 .sec-badge{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700;margin-left:4px}
 
+/* ── DEMO MODE ──────────────────────────────────────────────── */
+body.demo-mode .btn.danger { opacity:.35; pointer-events:none; }
+body.demo-mode button[onclick*="forceSyncNow"] { opacity:.35; pointer-events:none; }
+
 /* ── MOBILE RESPONSIVE ────────────────────────────────────────── */
 #mob-menu-btn{display:none;background:transparent;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1}
 #mob-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:299}
@@ -352,7 +356,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.51'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.52'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -635,8 +639,12 @@ function buildTrackingUrl(carrier, trackingNumber) {
   if (c.includes('usps'))                       return `https://tools.usps.com/go/TrackConfirmAction?qtc_tLabels1=${t}`;
   return '';
 }
-function addRow(t,r) { const rec={id:uid(),createdAt:today(),updatedAt:new Date().toISOString(),...r}; DB[t].unshift(rec); saveDB(t,rec.id); render(); }
+function addRow(t,r) {
+  if (window.DEMO_MODE) { showToast('🔒 Demo mode — editing disabled', 'error'); return; }
+  const rec={id:uid(),createdAt:today(),updatedAt:new Date().toISOString(),...r}; DB[t].unshift(rec); saveDB(t,rec.id); render();
+}
 function updateRow(t,id,r) {
+  if (window.DEMO_MODE) { showToast('🔒 Demo mode — editing disabled', 'error'); return; }
   DB[t] = DB[t].map(x => {
     if (x.id !== id) return x;
     // _editedFrom: tracks the updatedAt we started editing from, for conflict detection
@@ -647,6 +655,7 @@ function updateRow(t,id,r) {
   render();
 }
 function delRow(t,id) {
+  if (window.DEMO_MODE) { showToast('🔒 Demo mode — editing disabled', 'error'); return; }
   if(!confirm('Delete this record?'))return;
   // CASCADE: If deleting an inventory item, clean up all linked records
   if (t === 'inventory') {
@@ -2192,6 +2201,7 @@ function revertPartsDeduction(partsLines, invNumber) {
 
 function submitSale(e) {
   e.preventDefault();
+  if (window.DEMO_MODE) { showToast('🔒 Demo mode — editing disabled', 'error'); return; }
   if (_submitting) return;
   _submitting = true;
   const r = Object.fromEntries(new FormData(e.target));
@@ -5930,7 +5940,6 @@ async function forceSyncNow() {
 
 // ── LOGIN SCREEN ──────────────────────────────────────────────
 function _showLoginScreen() {
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   document.body.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;font-family:system-ui,sans-serif;">
       <div style="background:#11141c;border:1px solid #1e2535;border-radius:16px;padding:48px 40px;text-align:center;max-width:360px;width:100%">
@@ -5938,16 +5947,25 @@ function _showLoginScreen() {
         <h1 style="color:#e8eaf0;font-size:22px;font-weight:900;margin-bottom:4px">SDA Pinball</h1>
         <p style="color:#6b7280;font-size:13px;margin-bottom:32px">Inventory Management</p>
         <button id="login-btn"
-          style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+          style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px">
           <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg>
           Sign in with Google
         </button>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="flex:1;height:1px;background:#1e2535"></div>
+          <span style="color:#374151;font-size:11px">or</span>
+          <div style="flex:1;height:1px;background:#1e2535"></div>
+        </div>
+        <button id="demo-btn"
+          style="width:100%;background:transparent;color:#a78bfa;border:1px solid #4c1d95;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+          🎮 Try Demo — No login required
+        </button>
         <p id="login-err" style="color:#ef4444;font-size:12px;margin-top:12px;min-height:16px"></p>
-        <p style="color:#374151;font-size:11px;margin-top:24px">Access restricted to authorized accounts.</p>
+        <p style="color:#374151;font-size:11px;margin-top:24px">Authorized accounts only.</p>
       </div>
     </div>`;
 
-  // Bind directly — synchronous tap handler required for iOS Safari popup/redirect
+  // Sign in button
   document.getElementById('login-btn').addEventListener('click', function() {
     const errEl = document.getElementById('login-err');
     if (!window._fbSignIn) {
@@ -5962,6 +5980,83 @@ function _showLoginScreen() {
       if (errEl) errEl.textContent = e.message;
     });
   });
+
+  // Demo button
+  document.getElementById('demo-btn').addEventListener('click', function() {
+    _startDemo();
+  });
+}
+
+function _startDemo() {
+  window.DEMO_MODE = true;
+  // Force reseed with demo data
+  const DEMO_SEED = {
+    inventory: [
+      {id:'inv-001',createdAt:'2026-01-05',updatedAt:'2026-03-01',machineName:'Godzilla Premium',serialNumber:'G2411001',status:'in_stock',condition:'New',section:'NEW SHOWROOM',location:'BDK Warehouse',cost:'7200',notes:'',dateReceived:'2026-01-05',dateSold:''},
+      {id:'inv-002',createdAt:'2026-01-10',updatedAt:'2026-03-10',machineName:'Godzilla Premium',serialNumber:'G2411002',status:'reserved',condition:'New',section:'NEW SHOWROOM',location:'BDK Warehouse',cost:'7200',notes:'',dateReceived:'2026-01-10',dateSold:''},
+      {id:'inv-003',createdAt:'2026-01-15',updatedAt:'2026-02-20',machineName:'Jaws Premium',serialNumber:'J2501001',status:'sold',condition:'New',section:'NEW SHOWROOM',location:'BDK Warehouse',cost:'6800',notes:'',dateReceived:'2026-01-15',dateSold:'2026-02-20'},
+      {id:'inv-004',createdAt:'2026-01-20',updatedAt:'2026-03-05',machineName:'King Kong Premium',serialNumber:'KK2503001',status:'in_stock',condition:'New',section:'NEW SHOWROOM',location:'Main Warehouse',cost:'7800',notes:'April build',dateReceived:'2026-01-20',dateSold:''},
+      {id:'inv-005',createdAt:'2026-02-01',updatedAt:'2026-03-01',machineName:'Walking Dead Premium',serialNumber:'WD2412001',status:'in_stock',condition:'New',section:'NEW SHOWROOM',location:'Main Warehouse',cost:'5900',notes:'Remastered',dateReceived:'2026-02-01',dateSold:''},
+      {id:'inv-006',createdAt:'2026-02-05',updatedAt:'2026-03-08',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',status:'reserved',condition:'New',section:'NEW SHOWROOM',location:'Showroom Floor',cost:'7100',notes:'',dateReceived:'2026-02-05',dateSold:''},
+      {id:'inv-007',createdAt:'2026-02-10',updatedAt:'2026-03-10',machineName:'Avengers Premium',serialNumber:'AV2501001',status:'in_stock',condition:'Used',section:'USED',location:'BDK Warehouse',cost:'4200',notes:'Good condition',dateReceived:'2026-02-10',dateSold:''},
+      {id:'inv-008',createdAt:'2026-02-15',updatedAt:'2026-02-28',machineName:'Deadpool Premium',serialNumber:'DP2412001',status:'sold',condition:'New',section:'NEW SHOWROOM',location:'BDK Warehouse',cost:'5400',notes:'',dateReceived:'2026-02-15',dateSold:'2026-02-28'},
+      {id:'inv-009',createdAt:'2026-03-01',updatedAt:'2026-03-01',machineName:'Venom Premium',serialNumber:'VN2503001',status:'in_stock',condition:'New',section:'NEW SHOWROOM',location:'Main Warehouse',cost:'7500',notes:'New arrival',dateReceived:'2026-03-01',dateSold:''},
+      {id:'inv-010',createdAt:'2026-03-05',updatedAt:'2026-03-05',machineName:'John Wick Premium',serialNumber:'JW2503001',status:'in_stock',condition:'New',section:'NEW SHOWROOM',location:'Showroom Floor',cost:'7900',notes:'Display unit',dateReceived:'2026-03-05',dateSold:''},
+    ],
+    sales: [
+      {id:'sale-001',createdAt:'2026-02-10',inventoryId:'inv-002',machineName:'Godzilla Premium',serialNumber:'G2411002',shopifyOrderNum:'#1521',invNumber:'1521',salePrice:'9499',saleDate:'2026-02-10',status:'open',paymentStatus:'ACH',paymentStage:'Deposit',customerName:'Mike Rodriguez',businessName:'',customerEmail:'mike.rod@email.com',customerPhone:'602-555-0182',customerAddress:'4521 Desert View Dr',customerCity:'Scottsdale',customerState:'AZ',customerZip:'85251',customerType:'Residential',liftgate:'Yes - Residential',notes:''},
+      {id:'sale-002',createdAt:'2026-02-20',inventoryId:'inv-006',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',shopifyOrderNum:'',invNumber:'1522',salePrice:'10499',saleDate:'2026-02-20',status:'pending',paymentStatus:'TRADE',paymentStage:'Paid in Full',customerName:'Dave Williams',businessName:'Pacific Arcade',customerEmail:'dave@pacificarcade.com',customerPhone:'503-555-0147',customerAddress:'892 Harbor Blvd',customerCity:'Portland',customerState:'OR',customerZip:'97201',customerType:'Business',liftgate:'No - Has Dock',notes:'Trade-in: TWD Pro'},
+      {id:'sale-003',createdAt:'2026-03-01',inventoryId:'',machineName:'Walking Dead Premium',serialNumber:'TBD',shopifyOrderNum:'#1535',invNumber:'1535',salePrice:'8499',saleDate:'2026-03-01',status:'open',paymentStatus:'ACH',paymentStage:'Hold',customerName:'Jennifer Park',businessName:'',customerEmail:'jpark@email.com',customerPhone:'714-555-0293',customerAddress:'1205 Sunset Lane',customerCity:'Anaheim',customerState:'CA',customerZip:'92801',customerType:'Residential',liftgate:'Yes - Residential',notes:'Waiting on serial'},
+    ],
+    sold: [
+      {id:'sold-001',createdAt:'2026-02-20',inventoryId:'inv-003',machineName:'Jaws Premium',serialNumber:'J2501001',invNumber:'1508',salePrice:'9999',dateSold:'2026-02-20',paymentStatus:'ACH',paymentStage:'Paid in Full',customerName:'Tom Bradley',customerEmail:'tombradley@gmail.com',customerPhone:'415-555-0134',customerAddress:'3344 Pacific Ave',customerCity:'San Francisco',customerState:'CA',customerZip:'94115',customerType:'Residential',liftgate:'Yes - Residential',condition:'New',cost:'6800',margin:'3199',shippingCompany:'XPO Logistics',trackingNumber:'1Z999AA10123456784'},
+      {id:'sold-002',createdAt:'2026-02-28',inventoryId:'inv-008',machineName:'Deadpool Premium',serialNumber:'DP2412001',invNumber:'1512',salePrice:'7999',dateSold:'2026-02-28',paymentStatus:'CASH',paymentStage:'Paid in Full',customerName:'Sarah Chen',businessName:'Fun Zone LLC',customerEmail:'sarah@funzone.biz',customerPhone:'702-555-0271',customerAddress:'5500 Las Vegas Blvd S',customerCity:'Las Vegas',customerState:'NV',customerZip:'89119',customerType:'Business',liftgate:'No - Has Dock',condition:'New',cost:'5400',margin:'2599',shippingCompany:'Forward Air',trackingNumber:'FA8821445001'},
+    ],
+    fulfillment: [
+      {id:'ful-001',createdAt:'2026-02-10',saleId:'sale-001',inventoryId:'inv-002',customerName:'Mike Rodriguez',customerEmail:'mike.rod@email.com',customerPhone:'602-555-0182',customerAddress:'4521 Desert View Dr',customerCity:'Scottsdale',customerState:'AZ',customerZip:'85251',customerType:'Residential',liftgate:'Yes - Residential',machineName:'Godzilla Premium',serialNumber:'G2411002',invNumber:'1521',method:'shipping',status:'pending',carrier:'',trackingNumber:'',paymentStatus:'ACH',paymentStage:'Deposit'},
+      {id:'ful-002',createdAt:'2026-02-20',saleId:'sale-002',inventoryId:'inv-006',customerName:'Dave Williams',businessName:'Pacific Arcade',customerEmail:'dave@pacificarcade.com',customerPhone:'503-555-0147',customerAddress:'892 Harbor Blvd',customerCity:'Portland',customerState:'OR',customerZip:'97201',customerType:'Business',liftgate:'No - Has Dock',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',invNumber:'1522',method:'shipping',status:'pending',carrier:'XPO Logistics',trackingNumber:'',paymentStatus:'TRADE',paymentStage:'Paid in Full'},
+      {id:'ful-003',createdAt:'2026-02-20',saleId:'sold-001',inventoryId:'inv-003',customerName:'Tom Bradley',customerEmail:'tombradley@gmail.com',customerPhone:'415-555-0134',customerAddress:'3344 Pacific Ave',customerCity:'San Francisco',customerState:'CA',customerZip:'94115',customerType:'Residential',liftgate:'Yes - Residential',machineName:'Jaws Premium',serialNumber:'J2501001',invNumber:'1508',method:'shipping',status:'delivered',carrier:'XPO Logistics',trackingNumber:'1Z999AA10123456784',scheduledDate:'2026-02-24',paymentStatus:'ACH',paymentStage:'Paid in Full'},
+    ],
+    pendingSales: [
+      {id:'ps-001',createdAt:'2026-01-15',gameName:'Godzilla Premium',customerName:'Chris Evans',state:'TX',price:'9499',paymentStatus:'DEP',paymentNotes:'$500 deposit 1/15',notes:'Wants April build'},
+      {id:'ps-002',createdAt:'2026-02-01',gameName:'King Kong Premium',customerName:'Lisa Thompson',businessName:'Game Room Guys',state:'FL',price:'10999',paymentStatus:'PIF',paymentNotes:'PIF 2/1/26',notes:'Business order'},
+      {id:'ps-003',createdAt:'2026-02-14',gameName:'Venom Premium',customerName:'Marcus Johnson',state:'IL',price:'10499',paymentStatus:'PEND',notes:'Wants white cabinet'},
+      {id:'ps-004',createdAt:'2026-03-01',gameName:'John Wick Premium',customerName:'Emily Davis',state:'NY',price:'10999',paymentStatus:'DEP',paymentNotes:'$1000 dep 3/1'},
+    ],
+    parts: [
+      {id:'part-001',createdAt:'2026-01-01',itemName:'Godzilla Topper',partId:'502-7145-00',game:'Godzilla',cost:'749.99',msrp:'999.99',supplier:'Stern Pinball',stockStatus:'In Stock',startQty:3,addedQty:0,soldQty:1,onHand:2,reorderPoint:'1',location:'Shelf A1'},
+      {id:'part-002',createdAt:'2026-01-01',itemName:'Jaws Art Blades',partId:'502-8036-V6',game:'Jaws',cost:'75',msrp:'99.99',supplier:'Stern Pinball',stockStatus:'In Stock',startQty:5,addedQty:0,soldQty:2,onHand:3,reorderPoint:'1',location:'Shelf A2'},
+      {id:'part-003',createdAt:'2026-01-01',itemName:'Shaker Motor Spike',partId:'502-5027-01',game:'Universal',cost:'115',msrp:'144.99',supplier:'Stern Pinball',stockStatus:'Out of Stock',startQty:2,addedQty:0,soldQty:2,onHand:0,reorderPoint:'1',location:'Shelf B2',notes:'Needs reorder'},
+    ],
+    leads: [
+      {id:'lead-001',createdAt:'2026-02-15',name:'Alex Turner',email:'alex.t@email.com',phone:'310-555-0142',interestedMachine:'Godzilla Premium',source:'Website',status:'new'},
+      {id:'lead-002',createdAt:'2026-02-20',name:'Rachel Green',email:'rgreen@biz.com',phone:'212-555-0188',interestedMachine:'King Kong',source:'Referral',status:'contacted'},
+    ],
+    service: [
+      {id:'svc-001',createdAt:'2026-02-15',customerName:'Dave Williams',customerEmail:'dave@pacificarcade.com',machineName:'Foo Fighters Premium',serialNumber:'FF2502001',issueType:'Warranty',description:'Flipper not responding on right side',status:'open',dealerNumber:'SDA001'},
+    ],
+    wantList: [
+      {id:'want-001',createdAt:'2026-02-10',machineName:'Metallica Premium',customerName:'Jeff Morrison',customerEmail:'jeff.m@email.com',maxPrice:'5500',priority:'high',status:'active'},
+    ],
+    locations: [
+      {id:'loc-001',createdAt:'2026-01-01',locationName:'Pacific Fun Center',machineName:'Walking Dead Premium',serialNumber:'WD2412001',startDate:'2026-01-01',status:'active',notes:'Revenue share 70/30'},
+    ],
+    customers: [],
+    warrantyClaims: [],
+    partOrders: [
+      {id:'po-001',createdAt:'2026-03-01',itemName:'Godzilla Topper',partId:'502-7145-00',qty:2,orderDate:'2026-03-01',estArrival:'2026-03-15',sternOrderNum:'STN-2026-0301',status:'ordered'},
+      {id:'po-002',createdAt:'2026-02-15',itemName:'Shaker Motor Spike',partId:'502-5027-01',qty:3,orderDate:'2026-02-15',sternOrderNum:'STN-2026-0215',status:'backordered',notes:'No ETA from Stern'},
+    ],
+    shopifyDismissed: [],
+    _meta: [{id:'version',seedVersion:999}]
+  };
+
+  // Load demo data into DB
+  Object.assign(DB, DEMO_SEED);
+  ensureTables();
+
+  // Start the app as a demo user
+  _startApp({ email: 'demo@pinballdemo.com', displayName: 'Demo User', isDemo: true });
 }
 
 // ── AUTH-GATED APP STARTUP ─────────────────────────────────────
@@ -6007,6 +6102,20 @@ async function _startApp(user) {
   const userEmailEl = document.getElementById('user-email');
   if (userEmailEl) userEmailEl.textContent = user.email;
   document.getElementById('nav').innerHTML = NAVS.map(([s,icon,label])=>`<button data-s="${s}" onclick="goto('${s}')" class="${s===section?'active':''}">${icon} ${label}</button>`).join('');
+
+  // Demo mode: show banner and block all edits
+  if (user && user.isDemo) {
+    window.DEMO_MODE = true;
+    document.body.classList.add('demo-mode');
+    // Insert demo banner at very top
+    if (!document.getElementById('demo-banner')) {
+      const b = document.createElement('div');
+      b.id = 'demo-banner';
+      b.style.cssText = 'background:linear-gradient(135deg,#1a1060,#2d1b8a);border-bottom:2px solid #6d28d9;color:#e8eaf0;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:500';
+      b.innerHTML = '<span>🎮 <strong>DEMO MODE</strong> — Read-only preview. Data resets on refresh.</span><button onclick="window.DEMO_MODE=false;document.getElementById(\'demo-banner\').remove();document.body.classList.remove(\'demo-mode\');window._fbSignOut()" style="background:transparent;border:1px solid #6d28d9;color:#a78bfa;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">✕ Exit Demo</button>';
+      document.body.insertBefore(b, document.body.firstChild);
+    }
+  }
   _setupDelegatedListeners();
   ensureTables();
   render();
