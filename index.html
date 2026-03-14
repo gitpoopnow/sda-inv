@@ -119,13 +119,25 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// Use redirect on mobile (popup blocked by iOS/Android browsers), popup on desktop
+// iOS Safari blocks popups and has cookie issues with redirects.
+// Solution: always use redirect (most reliable across all mobile browsers)
+// but set prompt to 'select_account' to ensure it works even when already signed in.
 const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+_provider.setCustomParameters({ prompt: 'select_account' });
 window._fbSignIn = async () => {
-  if (_isMobile) {
-    await _auth.signInWithRedirect(_provider);
-  } else {
-    return _auth.signInWithPopup(_provider);
+  try {
+    if (_isMobile) {
+      // iOS Safari: must use redirect — popups are always blocked
+      return await _auth.signInWithRedirect(_provider);
+    } else {
+      return await _auth.signInWithPopup(_provider);
+    }
+  } catch(e) {
+    // If popup fails for any reason, fall back to redirect
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request' || e.code === 'auth/popup-closed-by-user') {
+      return await _auth.signInWithRedirect(_provider);
+    }
+    throw e;
   }
 };
 window._fbSignOut  = () => {
@@ -368,7 +380,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.32'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.34'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
