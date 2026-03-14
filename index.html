@@ -123,13 +123,17 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// Force redirect sign-in for all devices — popup fails on iOS Safari
+// Desktop uses popup (reliable), mobile uses redirect (Safari blocks popups)
+const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 if (_provider) {
   _provider.setCustomParameters({ prompt: 'select_account' });
 }
 window._fbSignIn = async () => {
   if (!_auth || !_provider) throw new Error('Firebase unavailable');
-  return await _auth.signInWithRedirect(_provider);
+  if (_isMobile) {
+    return await _auth.signInWithRedirect(_provider);
+  }
+  return await _auth.signInWithPopup(_provider);
 };
 window._fbSignOut  = () => {
   // Clear local cache on sign-out so business data doesn't persist on shared computers
@@ -356,7 +360,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.55'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.56'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
