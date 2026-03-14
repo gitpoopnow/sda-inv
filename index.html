@@ -46,7 +46,7 @@ const ALLOWED_EMAILS = [
 // ── COLLECTIONS ───────────────────────────────────────────────
 // Each top-level key in DB gets its own Firestore collection.
 // Records are stored as documents keyed by record.id
-const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','_meta'];
+const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','_meta'];
 
 // Load all collections from Firestore in parallel
 window._fbLoadAll = async () => {
@@ -250,9 +250,9 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.20'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.21'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
-const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
+const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
 let DB = {};
 let syncTimer = null;
@@ -689,7 +689,7 @@ const NAVS = [
   ['leads','👥','Leads'],['service','🔧','Service'],
   ['wantlist','⭐','Want List'],['fulfillment','🚚','Fulfillment'],
   ['parts','🔩','Parts / Access.'],['locations','📍','Locations'],
-  ['warranty','🛡️','Warranty Claims'],['shopify','🛍️','Shopify Orders']
+  ['partorders','📦','Part Orders'],['warranty','🛡️','Warranty Claims'],['shopify','🛍️','Shopify Orders']
 ];
 function goto(s, preset) {
   section = s;
@@ -3359,6 +3359,7 @@ function render() {
       fulfillment: ()=>renderFulfillment(),
       warranty: ()=>renderWarrantyClaims(),
       shopify: ()=>renderShopifyOrders(),
+      partorders: ()=>renderPartOrders(),
     }[section]||renderDashboard)();
   } catch(err) {
     console.error('[SDA render error]', err);
@@ -4135,6 +4136,342 @@ function parseSDAInvoice(rawText) {
 
   console.log('Parsed fields:', fields);
   return fields;
+}
+
+// ── PART ORDERS ───────────────────────────────────────────────
+let partOrderEditing = null;
+let partOrderView = 'active'; // 'active' | 'all'
+
+// Known Stern parts with part IDs pre-filled
+const STERN_KNOWN_PARTS = [
+  // Toppers
+  {name:'Godzilla Topper',               id:'502-7145-00'},
+  {name:'Godzilla 70th Topper',          id:'502-7145-T8'},
+  {name:'King Kong Topper',              id:'502-8070-00'},
+  {name:'Jaws Topper',                   id:'502-8039-00'},
+  {name:'Jaws 50th Anniv Topper',        id:'502-8039-AL'},
+  {name:'SW FOE Topper',                 id:'502-8079-00'},
+  {name:'Metallica Remastered Topper',   id:'502-8054-00'},
+  {name:'Walking Dead Topper',           id:'502-8072-00'},
+  {name:'Elvira Topper Kit',             id:'502-7105-00'},
+  {name:'Deadpool Topper',               id:'502-7080-00'},
+  {name:'Black Knight Topper',           id:'502-7095-00'},
+  {name:'John Wick Topper',             id:'502-8050-00'},
+  {name:'Avengers Topper',              id:'502-7131-00'},
+  {name:'Jurassic Park Topper',         id:'502-7111-00'},
+  {name:'Foo Fighters Topper',          id:'502-8031-00'},
+  {name:'Venom Topper',                 id:'502-7174-00'},
+  {name:'Uncanny X-Men Topper',         id:'502-8066-00'},
+  {name:'James Bond Topper',            id:'502-8027-00'},
+  {name:'Iron Maiden Topper - Battle Field', id:'502-7064-00'},
+  // Art Blades
+  {name:'Godzilla Art Blade Kit',        id:'502-7148-00'},
+  {name:'Godzilla 70th Art Blade Kit',   id:'502-7148-T8'},
+  {name:'King Kong Art Blade Kit',       id:'502-8036-Z6'},
+  {name:'Jaws Art Blades',              id:'502-8036-V6'},
+  {name:'SW FOE Art Blades PRO',        id:'502-8075-00'},
+  {name:'Metallica Remastered Cab Expn Lit Blades', id:'502-8013-X6'},
+  {name:'Walking Dead Art Blades',      id:'502-8036-AM'},
+  {name:'Elvira - Curves Art Blades',   id:'502-7085-J2'},
+  {name:'Deadpool Art Blades',          id:''},
+  {name:'Foo Fighters Art Blades Pro',  id:'502-8036-00'},
+  {name:'Venom Art Blades',             id:'502-8036-U2'},
+  {name:'Uncanny X-Men Art Blades',     id:'502-8036-Y6'},
+  {name:'James Bond Art Blades',        id:'502-7160-00'},
+  {name:'Jurassic Park Art Blades',     id:'502-7085-M3'},
+  {name:'SW FOE Cab Exp Light PREM',    id:'502-8087-00'},
+  // Side Armor
+  {name:'Godzilla Side Armor Kit',       id:'502-7147-00'},
+  {name:'Godzilla 70th Side Armor Kit',  id:'502-7147-T8'},
+  {name:'King Kong Side Armor Kit',      id:'502-7086-Z6'},
+  {name:'Jaws Side Armor',              id:'502-8032-00'},
+  {name:'SW FOE Side Armor',            id:'508-8074-00'},
+  {name:'Metallica Remastered Side Armor',id:'502-7129-X6'},
+  {name:'Walking Dead Side Armor',      id:'502-7183-00'},
+  {name:'Elvira Side Armor Kit',        id:'502-7112-00'},
+  {name:'Deadpool Side Armor',          id:'502-7077-00'},
+  {name:'Foo Fighters Side Armor',      id:'502-8029-00'},
+  {name:'Venom Side Armor',             id:'502-7176-00'},
+  {name:'Uncanny X-Men Side Armor',     id:'502-7086-Y6'},
+  {name:'James Bond Side Armor',        id:'502-7159-00'},
+  {name:'Jurassic Park Side Armor',     id:'502-7086-M3'},
+  // Shooter Knobs
+  {name:'Godzilla Shooter Kit',         id:'502-7146-00'},
+  {name:'Godzilla 70th Shooter Kit',    id:'502-7146-T8'},
+  {name:'King Kong Shooter Kit',        id:'502-8031-Z6'},
+  {name:'Jaws Shooter Knob',           id:'502-8033-00'},
+  {name:'SW FOE Shooter Knob',         id:'502-8073-00'},
+  {name:'Metallica Remastered Shooter', id:'502-7133-X6'},
+  {name:'Walking Dead Shooter Knob',   id:'502-7133-AM'},
+  {name:'Elvira Shooter Knob',         id:'502-7107-00'},
+  {name:'Deadpool Shooter Knob',       id:''},
+  {name:'Foo Fighters Shooter Knob',   id:'502-8030-00'},
+  {name:'Venom Shooter Knob',          id:'502-7175-00'},
+  {name:'Uncanny X-Men Shooter Knob',  id:''},
+  {name:'James Bond Shooter Knob',     id:'502-7158-00'},
+  {name:'Jurassic Park Shooter Knob',  id:'502-7101-00'},
+  {name:'Avengers Shooter Knob',       id:'502-7132-00'},
+  {name:'John Wick Shooter Knob',      id:'502-8031-W6'},
+  {name:'Rush Shooter Knob Kit',       id:'502-7150-00'},
+  // Misc Parts
+  {name:'Shaker Motor OPT Kit - Spike',  id:'502-5027-01'},
+  {name:'Playfield High-Rez Glass',      id:'502-6845-00'},
+  {name:'Headphone Adaptor Spike 2',     id:'502-7008-00'},
+  {name:'Expression INT Light Syst SPIKE 3', id:'502-7181-00'},
+  {name:'Side Armor Expsn Light Syst SPIKE 3', id:'502-7182-00'},
+  {name:'Expression Speaker Lighting Pro/Prem', id:'502-8040-00'},
+  {name:'Expression Speaker Lighting LE', id:'502-8041-00'},
+  {name:'QR Arch Kit Pro',              id:'502-5420-00'},
+  {name:'QR Arch Kit Prem',             id:'502-5420-01'},
+  {name:'Long Range OPTO EMITTER',      id:'515-0215-00'},
+  {name:'Long Range OPTO REC',          id:'515-0215-01'},
+  {name:'John Wick Expsn Light Blades', id:'502-8013-W7'},
+  {name:'Rush Expression Lighting',     id:'502-8013-T1'},
+  {name:'Stern Pop Bumper Light',        id:'883-5078-00'},
+  {name:'Stern Pin Alley Sign (Square)', id:'883-5079-00'},
+  {name:'Arcade Pinball Alley Sign (Arch)', id:'883-5105-00'},
+  {name:'Stern Logo Mat',               id:'883-5010-00'},
+  {name:'Stern Infinity Light',         id:'883-5125-00'},
+  {name:'BoF - HD Glass',               id:''},
+  {name:'Door-USA 2 CHT/Cable Spike',   id:'501-5018-173'},
+  {name:'Other (custom)',               id:''},
+];
+
+function renderPartOrders() {
+  if (!DB.partOrders) DB.partOrders = [];
+  const orders = partOrderView === 'active'
+    ? DB.partOrders.filter(o => !['received','cancelled'].includes(o.status))
+    : DB.partOrders;
+
+  const statusBadgeMap = {
+    ordered:    'bg-blue',
+    backordered:'bg-orange',
+    shipped:    'bg-purple',
+    received:   'bg-green',
+    cancelled:  'bg-red',
+  };
+
+  const knownOpts = STERN_KNOWN_PARTS.map(p =>
+    `<option value="${esc(p.name)}" data-part-id="${esc(p.id)}">${esc(p.name)}${p.id?' ('+p.id+')':''}</option>`
+  ).join('');
+
+  const rec = partOrderEditing || {};
+
+  return `
+  <h1 class="pt">📦 Part Orders</h1>
+
+  <!-- ORDER FORM -->
+  <div class="panel">
+    <h3 style="font-size:13px;font-weight:800;margin-bottom:14px">${partOrderEditing ? '✏️ Edit Order' : '➕ New Parts Order'}</h3>
+    <form onsubmit="submitPartOrder(event)">
+      <div class="grid">
+        <div class="fw" style="grid-column:1/-1">
+          <label class="fl">PART NAME</label>
+          <select id="po-known-select" onchange="onPartOrderSelect(this)" style="margin-bottom:6px">
+            <option value="">— Select a known Stern part or choose Custom below —</option>
+            ${knownOpts}
+          </select>
+        </div>
+        <div class="fw"><label class="fl">ITEM NAME</label><input name="itemName" id="po-item-name" value="${esc(rec.itemName||'')}" required placeholder="Part name"></div>
+        <div class="fw"><label class="fl">PART ID / SKU</label><input name="partId" id="po-part-id" value="${esc(rec.partId||'')}" placeholder="e.g. 502-7145-00"></div>
+        <div class="fw"><label class="fl">QTY</label><input type="number" name="qty" min="1" value="${rec.qty||1}" required></div>
+        <div class="fw"><label class="fl">UNIT COST ($)</label><input type="number" step="0.01" name="unitCost" value="${rec.unitCost||''}" placeholder="0.00"></div>
+        <div class="fw"><label class="fl">STATUS</label>
+          <select name="status">
+            ${['ordered','backordered','shipped','received','cancelled'].map(s=>`<option value="${s}"${(rec.status||'ordered')===s?' selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fw"><label class="fl">ORDER DATE</label><input type="date" name="orderDate" value="${rec.orderDate||today()}"></div>
+        <div class="fw"><label class="fl">EST. ARRIVAL</label><input type="date" name="estArrival" value="${rec.estArrival||''}"></div>
+        <div class="fw"><label class="fl">STERN ORDER #</label><input name="sternOrderNum" value="${esc(rec.sternOrderNum||'')}" placeholder="Stern confirmation #"></div>
+        <div class="fw"><label class="fl">INV # (linked sale)</label><input name="invNumber" value="${esc(rec.invNumber||'')}" placeholder="e.g. 1492"></div>
+        <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNum" value="${esc(rec.trackingNum||'')}" placeholder="Tracking number"></div>
+        <div class="fw"><label class="fl">RECEIVED DATE</label><input type="date" name="receivedDate" value="${rec.receivedDate||''}"></div>
+      </div>
+      <div class="fw" style="margin-bottom:10px"><label class="fl">NOTES</label><textarea name="notes" placeholder="Any special notes for this order...">${esc(rec.notes||'')}</textarea></div>
+      <div class="br" style="gap:8px;flex-wrap:wrap">
+        <button class="btn" type="submit">${partOrderEditing ? 'Save Changes' : '📧 Place Order via Email'}</button>
+        ${partOrderEditing ? `<button class="btn ghost" type="button" onclick="partOrderEditing=null;render()">Cancel</button>` : `<button class="btn ghost" type="button" onclick="this.closest('form').reset();document.getElementById('po-known-select').selectedIndex=0;document.getElementById('po-item-name').value='';document.getElementById('po-part-id').value=''">Clear</button>`}
+        ${partOrderEditing && partOrderEditing.status !== 'received' ? `<button class="btn success" type="button" onclick="markPartOrderReceived('${partOrderEditing.id}')">✅ Mark Received & Add to Inventory</button>` : ''}
+      </div>
+    </form>
+  </div>
+
+  <!-- ORDER LOG -->
+  <div class="panel">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <h3 style="font-size:13px;font-weight:800;margin:0">Order History</h3>
+      <div style="display:flex;gap:6px">
+        <button class="btn${partOrderView==='active'?' ':" ghost "}" style="font-size:11px;padding:4px 10px" onclick="partOrderView='active';render()">Active (${DB.partOrders.filter(o=>!['received','cancelled'].includes(o.status)).length})</button>
+        <button class="btn${partOrderView==='all'?' ':" ghost "}" style="font-size:11px;padding:4px 10px" onclick="partOrderView='all';render()">All (${DB.partOrders.length})</button>
+      </div>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>PART NAME</th><th>PART ID</th><th>QTY</th><th>COST</th>
+        <th>STATUS</th><th>ORDER DATE</th><th>EST. ARRIVAL</th>
+        <th>STERN #</th><th>TRACKING</th><th>INV #</th><th>NOTES</th><th></th>
+      </tr></thead>
+      <tbody>${orders.length ? orders.map(o => {
+        const total = o.qty && o.unitCost ? '$'+(Number(o.qty)*Number(o.unitCost)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+        return `<tr style="${o.status==='received'?'opacity:.6':''}">
+          <td style="font-weight:600">${esc(o.itemName)}</td>
+          <td class="m" style="font-family:monospace">${esc(o.partId)||'—'}</td>
+          <td class="m">${o.qty||1}</td>
+          <td>${total}</td>
+          <td><span class="badge ${statusBadgeMap[o.status]||'bg-blue'}">${esc(o.status)}</span></td>
+          <td class="m">${o.orderDate||'—'}</td>
+          <td class="m">${o.estArrival||'—'}</td>
+          <td class="m">${esc(o.sternOrderNum)||'—'}</td>
+          <td class="m">${o.trackingNum ? `<a href="#" onclick="return false" style="color:var(--accent)">${esc(o.trackingNum)}</a>` : '—'}</td>
+          <td class="m">${esc(o.invNumber)||'—'}</td>
+          <td class="m" style="font-size:11px;max-width:120px">${esc(o.notes)||'—'}</td>
+          <td><div class="ta">
+            ${o.status !== 'received' ? `<button class="btn sm success" data-po-id="${o.id}" onclick="markPartOrderReceived(this.dataset.poId)" title="Mark received & add to inventory">✅</button>` : ''}
+            <button class="btn sm ghost" data-po-id="${o.id}" onclick="editPartOrderById(this.dataset.poId)">Edit</button>
+            <button class="btn sm danger" data-po-id="${o.id}" onclick="delRow('partOrders',this.dataset.poId)">✕</button>
+          </div></td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="12" class="empty">No part orders yet.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+
+function onPartOrderSelect(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) return;
+  const partName = opt.value;
+  const partId   = opt.dataset.partId || '';
+  document.getElementById('po-item-name').value = partName;
+  document.getElementById('po-part-id').value   = partId;
+}
+
+function editPartOrderById(id) {
+  partOrderEditing = (DB.partOrders||[]).find(o => o.id === id) || null;
+  render();
+  window.scrollTo(0,0);
+}
+
+function submitPartOrder(e) {
+  e.preventDefault();
+  const r = Object.fromEntries(new FormData(e.target));
+  r.qty = parseInt(r.qty) || 1;
+
+  if (partOrderEditing) {
+    updateRow('partOrders', partOrderEditing.id, r);
+    partOrderEditing = null;
+    showToast('✅ Order updated');
+  } else {
+    // Save the order record first
+    const newId = uid();
+    const newOrder = {id: newId, createdAt: today(), ...r, status: r.status || 'ordered'};
+    if (!DB.partOrders) DB.partOrders = [];
+    DB.partOrders.unshift(newOrder);
+    saveDB('partOrders', newId);
+    render();
+
+    // Open Gmail compose pre-filled to Stern Parts Sales
+    const qty       = r.qty || 1;
+    const partName  = r.itemName || '';
+    const partId    = r.partId || '';
+    const invNum    = r.invNumber ? `INV #${r.invNumber}` : '';
+    const notes     = r.notes || '';
+    const subject   = `Parts Order — ${partName}${partId ? ' ('+partId+')' : ''} × ${qty}`;
+    const body = [
+      `Hello Stern Parts Sales,`,
+      ``,
+      `Please process the following parts order for San Diego Amusements:`,
+      ``,
+      `Part Name:  ${partName}`,
+      partId ? `Part ID:    ${partId}` : '',
+      `Quantity:   ${qty}`,
+      r.unitCost ? `Unit Cost:  $${r.unitCost}` : '',
+      invNum ? `Reference:  ${invNum}` : '',
+      notes ? `Notes:      ${notes}` : '',
+      ``,
+      `Please confirm receipt of this order and provide an estimated ship date.`,
+      ``,
+      `Thank you,`,
+      `San Diego Amusements`,
+    ].filter(l => l !== null && l !== undefined).join('\n');
+
+    const gmailUrl = 'https://mail.google.com/mail/?view=cm'
+      + '&to=' + encodeURIComponent('Parts.Sales@sternpinball.com')
+      + '&su=' + encodeURIComponent(subject)
+      + '&body=' + encodeURIComponent(body);
+
+    const a = document.createElement('a');
+    a.href = gmailUrl; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+    showToast('📧 Gmail opened — review and send your order to Stern!');
+  }
+}
+
+function markPartOrderReceived(id) {
+  const order = (DB.partOrders||[]).find(o => o.id === id);
+  if (!order) return;
+  if (!confirm(`Mark "${order.itemName}" (×${order.qty||1}) as received?\n\nThis will:\n• Set status to Received\n• Add quantity to the matching part in Parts inventory`)) return;
+
+  const ts = new Date().toISOString();
+  const receivedDate = today();
+
+  // Update the order status
+  const oidx = DB.partOrders.findIndex(o => o.id === id);
+  if (oidx !== -1) DB.partOrders[oidx] = {...order, status: 'received', receivedDate, updatedAt: ts};
+
+  // Find matching part in DB.parts by partId or name and increment addedQty
+  let matched = false;
+  if (order.partId) {
+    const pidx = (DB.parts||[]).findIndex(p => (p.partId||'').trim() === order.partId.trim());
+    if (pidx !== -1) {
+      const p = DB.parts[pidx];
+      const newAdded = Number(p.addedQty||0) + Number(order.qty||1);
+      const newOnHand = Number(p.startQty||0) + newAdded - Number(p.soldQty||0);
+      DB.parts[pidx] = {...p, addedQty: newAdded, onHand: newOnHand, updatedAt: ts};
+      matched = true;
+      saveDB('parts', p.id);
+    }
+  }
+  if (!matched && order.itemName) {
+    const pidx = (DB.parts||[]).findIndex(p => (p.itemName||'').toLowerCase().trim() === order.itemName.toLowerCase().trim());
+    if (pidx !== -1) {
+      const p = DB.parts[pidx];
+      const newAdded = Number(p.addedQty||0) + Number(order.qty||1);
+      const newOnHand = Number(p.startQty||0) + newAdded - Number(p.soldQty||0);
+      DB.parts[pidx] = {...p, addedQty: newAdded, onHand: newOnHand, updatedAt: ts};
+      matched = true;
+      saveDB('parts', p.id);
+    }
+  }
+
+  if (!matched) {
+    // Part not in inventory yet — create it
+    const newPartId = uid();
+    const newPart = {
+      id: newPartId, createdAt: today(), updatedAt: ts,
+      itemName: order.itemName || '',
+      partId: order.partId || '',
+      cost: order.unitCost || '',
+      startQty: 0,
+      addedQty: Number(order.qty||1),
+      soldQty: 0,
+      onHand: Number(order.qty||1),
+      invNumbers: order.invNumber || '',
+      notes: `Added via Part Order ${receivedDate}`,
+    };
+    if (!DB.parts) DB.parts = [];
+    DB.parts.unshift(newPart);
+    saveDB('parts', newPartId);
+    showToast(`✅ "${order.itemName}" received — new part created in Parts inventory`);
+  } else {
+    showToast(`✅ "${order.itemName}" received — qty updated in Parts inventory`);
+  }
+
+  saveDB('partOrders', id);
+  partOrderEditing = null;
+  render();
 }
 
 // ── WARRANTY CLAIMS ───────────────────────────────────────────
