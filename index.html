@@ -121,14 +121,13 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// Use popup for all devices — redirect fails on iOS Safari + GitHub Pages (ITP cookie blocking)
-const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// Force redirect sign-in for all devices — popup fails on iOS Safari
 if (_provider) {
   _provider.setCustomParameters({ prompt: 'select_account' });
 }
 window._fbSignIn = async () => {
   if (!_auth || !_provider) throw new Error('Firebase unavailable');
-  return await _auth.signInWithPopup(_provider);
+  return await _auth.signInWithRedirect(_provider);
 };
 window._fbSignOut  = () => {
   // Clear local cache on sign-out so business data doesn't persist on shared computers
@@ -350,7 +349,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.41'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.42'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -5870,19 +5869,21 @@ async function init() {
     }
   }
 
-  // On mobile: check for redirect result FIRST — this is how iOS Safari signs in
-  const _isMobileInit = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  if (_isMobileInit && _auth && _auth.getRedirectResult) {
+  // Check for redirect result first — we use signInWithRedirect for all devices
+  // This fires after Google redirects the user back to the app
+  if (_auth && _auth.getRedirectResult) {
     try {
       const result = await _auth.getRedirectResult();
       if (result && result.user) {
-        // Redirect sign-in completed — start the app directly
         await _startApp(result.user);
         return;
       }
     } catch(e) {
-      if (e.code !== 'auth/no-auth-event') {
+      if (e.code !== 'auth/no-auth-event' && e.code !== 'auth/null-user') {
         console.warn('[SDA] Redirect result error:', e.message);
+        // Show error on login screen if it's already visible
+        const errEl = document.getElementById('login-err');
+        if (errEl) errEl.textContent = e.message;
       }
     }
   }
