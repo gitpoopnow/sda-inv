@@ -241,7 +241,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.14'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.15'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -3157,24 +3157,28 @@ async function fetchShopifyFromGmail() {
     // Convert Apps Script format to app format
     const orders = rawOrders.map(o => ({
       shopifyOrderNum: '#' + o.orderNumber,
-      customerName: o.customerName || '',
+      customerName: o.customerName || o.placedBy || '',
       customerEmail: o.customerEmail || '',
       customerPhone: o.customerPhone || '',
-      customerAddress: o.address || '',
-      customerCity: o.city || '',
-      customerState: o.state || '',
-      customerZip: o.zip || '',
-      orderDate: (o.orderDate||'').slice(0,10),
-      shippingMethod: o.shippingType || '',
-      shippingCost: parseFloat(o.shippingCost||0),
-      subtotal: parseFloat(o.salePrice||0),
+      customerAddress: o.customerAddress || o.address || '',
+      customerCity: o.customerCity || o.city || '',
+      customerState: o.customerState || o.state || '',
+      customerZip: o.customerZip || o.zip || '',
+      orderDate: (o.date || o.orderDate || '').slice(0,10),
+      shippingMethod: o.shippingMethod || o.shippingType || '',
+      shippingCost: parseFloat(o.shipping || o.shippingCost || 0),
+      subtotal: parseFloat(o.subtotal || o.salePrice || 0),
       total: o.total ? '$'+o.total : '',
-      liftgate: '',
-      lineItems: [{
+      liftgate: o.liftgate || '',
+      lineItems: (o.items && o.items.length ? o.items.map(item => ({
+        rawName: item.name || '',
+        qty: parseInt(item.qty||1),
+        price: parseFloat(item.price||0)
+      })) : [{
         rawName: o.productName || '',
         qty: parseInt(o.quantity||1),
-        price: parseFloat(o.salePrice||0)
-      }],
+        price: parseFloat(o.subtotal || o.salePrice || 0)
+      }]),
       _status: 'pending',
       _msgId: o.msgId,
       _shopifyUrl: o.shopifyUrl
