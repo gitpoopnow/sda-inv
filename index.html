@@ -250,7 +250,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.27'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.28'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -343,7 +343,7 @@ async function loadDB() {
     if (needsReseed) {
       // Seed or re-seed all collections to Firestore from SEED
       setSyncStatus('loading', '⟳ Syncing data to cloud…');
-      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
+      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
       for (const col of cols) {
         const records = SEED[col] || [];
         if (records.length > 0) {
@@ -355,7 +355,7 @@ async function loadDB() {
       // DB already has seed data
     } else {
       // Load everything from Firestore
-      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
+      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
       cols.forEach(col => {
         if (remote[col] !== undefined) DB[col] = remote[col]; // remote is source of truth even if empty
       });
@@ -401,7 +401,7 @@ function _notifyOtherTabs() {
 
 // ── REAL-TIME LISTENERS (per collection) ──────────────────────
 function _startRealTimeWatch() {
-  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
+  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
@@ -461,7 +461,7 @@ function saveDB(col, id) {
     if (record) _saveQueue[col + '::' + id] = { col, record };
   } else {
     // No specific record — queue everything (used by complex operations)
-    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed'];
+    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
     cols.forEach(c => {
       (DB[c] || []).forEach(r => {
         if (r && r.id) _saveQueue[c + '::' + r.id] = { col: c, record: r };
