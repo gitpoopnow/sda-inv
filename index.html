@@ -241,7 +241,7 @@ const SEED = {"inventory": [{"id": "1773266889123-8hatinsw2p6", "createdAt": "20
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.16'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.17'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed'];
 
@@ -531,22 +531,37 @@ function delRow(t,id) {
   // CASCADE: If deleting an inventory item, clean up all linked records
   if (t === 'inventory') {
     const linkedSales = (DB.sales||[]).filter(s => s.inventoryId === id);
+    const linkedSold  = (DB.sold||[]).filter(s => s.inventoryId === id);
+    const linkedFulfs = (DB.fulfillment||[]).filter(f =>
+      f.inventoryId === id ||
+      linkedSales.some(s => s.id === f.saleId) ||
+      linkedSold.some(s => s.id === f.saleId)
+    );
     linkedSales.forEach(s => { DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== s.id); });
     DB.sales = (DB.sales||[]).filter(s => s.inventoryId !== id);
-    const linkedSold = (DB.sold||[]).filter(s => s.inventoryId === id);
     linkedSold.forEach(s => { DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== s.id); });
     DB.sold = (DB.sold||[]).filter(s => s.inventoryId !== id);
     DB.fulfillment = (DB.fulfillment||[]).filter(f => f.inventoryId !== id);
+    // Delete all cascaded records from Firestore
+    if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+      linkedSales.forEach(s => window._fbDeleteRecord('sales', s.id).catch(e => console.warn('[SDA]', e)));
+      linkedSold.forEach(s => window._fbDeleteRecord('sold', s.id).catch(e => console.warn('[SDA]', e)));
+      linkedFulfs.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA]', e)));
+    }
   }
   // CASCADE: If deleting a sale, clean up fulfillment and restore inventory
   if (t === 'sales') {
     const sale = (DB.sales||[]).find(s => s.id === id);
     if (sale) {
+      const saleFulfs = (DB.fulfillment||[]).filter(f => f.saleId === id);
       DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
       const invItem = sale.inventoryId ? (DB.inventory||[]).find(i => i.id === sale.inventoryId) : null;
       if (invItem) {
         const idx = DB.inventory.findIndex(i => i.id === invItem.id);
-        if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: ''};
+        if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: '', updatedAt: new Date().toISOString()};
+      }
+      if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+        saleFulfs.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA]', e)));
       }
     }
   }
@@ -554,11 +569,15 @@ function delRow(t,id) {
   if (t === 'sold') {
     const sold = (DB.sold||[]).find(s => s.id === id);
     if (sold) {
+      const soldFulfs = (DB.fulfillment||[]).filter(f => f.saleId === id);
       DB.fulfillment = (DB.fulfillment||[]).filter(f => f.saleId !== id);
       const invItem = sold.inventoryId ? (DB.inventory||[]).find(i => i.id === sold.inventoryId) : null;
       if (invItem) {
         const idx = DB.inventory.findIndex(i => i.id === invItem.id);
-        if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: ''};
+        if (idx !== -1) DB.inventory[idx] = {...invItem, status: 'in_stock', dateSold: '', updatedAt: new Date().toISOString()};
+      }
+      if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+        soldFulfs.forEach(f => window._fbDeleteRecord('fulfillment', f.id).catch(e => console.warn('[SDA]', e)));
       }
     }
   }
@@ -2837,11 +2856,16 @@ function psToSold(r) {
     const idx = DB.inventory.findIndex(i => i.id === invRef.id);
     if (idx !== -1) DB.inventory[idx] = {...invRef, status: 'sold', dateSold: soldDate};
   }
-  // Remove from pre-orders
+  // Remove from pre-orders — and delete from Firestore so it doesn't come back
+  const psId = r.id;
   DB.pendingSales = DB.pendingSales.filter(x => x.id !== r.id);
   upsertCustomer(r);
   salesView = 'sold';
-  saveDB(); goto('sales');
+  saveDB();
+  if (window._fbReady && window._fbUser && window._fbDeleteRecord) {
+    window._fbDeleteRecord('pendingSales', psId).catch(e => console.warn('[SDA] delete pendingSale error:', e));
+  }
+  goto('sales');
 }
 
 
