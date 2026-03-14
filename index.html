@@ -356,7 +356,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.53'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.55'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -6061,9 +6061,9 @@ function _startDemo() {
 
 // ── AUTH-GATED APP STARTUP ─────────────────────────────────────
 async function _startApp(user) {
-  // Check allow-list (if configured)
+  // Demo user bypasses the allow-list check
   const allowed = window._fbAllowed || [];
-  if (allowed.length > 0 && !allowed.includes(user.email)) {
+  if (!user.isDemo && allowed.length > 0 && !allowed.includes(user.email)) {
     document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0c10;font-family:system-ui,sans-serif;color:#e8eaf0;text-align:center"><div><p style="font-size:32px">🚫</p><p style="margin-top:12px">Access denied for <strong id="denied-email"></strong>.<br>Contact the admin to be added.</p><p style="margin-top:8px;font-size:11px;color:#6b7280">Signed in as: <span id="denied-email2" style="color:#f59e0b"></span></p><button id="denied-signout" style="margin-top:20px;background:#374151;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Sign out</button></div></div>`;
     document.getElementById('denied-email').textContent = user.email;
     document.getElementById('denied-email2').textContent = user.email;
@@ -6175,8 +6175,11 @@ async function init() {
     const { user } = window._fbPendingAuthUser;
     window._fbPendingAuthUser = null;
     await window._onAuthChange(user);
-  } else if (!window._fbUser && window._fbReady) {
-    // No auth event yet and not signed in — show login
+  } else if (window._fbUser) {
+    // onAuthStateChanged already fired and user is signed in — start app directly
+    await _startApp(window._fbUser);
+  } else {
+    // No auth event yet — show login screen
     _showLoginScreen();
   }
 
