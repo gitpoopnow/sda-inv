@@ -250,7 +250,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.21'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.25'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -2373,25 +2373,37 @@ function revertSaleToInventory(id) {
 let partsEditing = null;
 function renderParts() {
   const rec = partsEditing||{};
-  let rows = DB.parts;
-  const sq = document.getElementById('parts-sq')?.value||'';
   return `
   <h1 class="pt">Parts / Accessories</h1>
-  <input placeholder="🔍 Search parts, part IDs…" oninput="filterTbl('parts-tbody','parts',this.value,['itemName','partId','notes'])" style="border-radius:9px;padding:8px 14px;margin-bottom:12px">
+  <input placeholder="🔍 Search parts, part IDs, game, notes…" oninput="filterTbl('parts-tbody','parts',this.value,['itemName','partId','game','notes','invNumbers'])" style="border-radius:9px;padding:8px 14px;margin-bottom:12px;width:100%;max-width:420px">
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:12px">${partsEditing?'✏️ Edit':'➕ Add'} Part / Accessory</h3>
     <form onsubmit="submitParts(event)">
       <div class="grid">
-        <div class="fw"><label class="fl">ITEM NAME</label><input name="itemName" value="${rec.itemName||''}" required></div>
-        <div class="fw"><label class="fl">PART ID</label><input name="partId" value="${rec.partId||''}"></div>
-        <div class="fw"><label class="fl">COST ($)</label><input type="number" step="0.01" name="cost" value="${rec.cost||''}"></div>
+        <div class="fw" style="grid-column:span 2"><label class="fl">ITEM NAME</label><input name="itemName" value="${esc(rec.itemName||'')}" required placeholder="e.g. Godzilla Topper"></div>
+        <div class="fw"><label class="fl">PART ID / SKU</label><input name="partId" value="${esc(rec.partId||'')}" placeholder="e.g. 502-7145-00" style="font-family:monospace"></div>
+        <div class="fw"><label class="fl">GAME / CATEGORY</label><input name="game" value="${esc(rec.game||'')}" placeholder="e.g. Godzilla, Universal"></div>
+        <div class="fw"><label class="fl">WHOLESALE COST ($)</label><input type="number" step="0.01" name="cost" value="${rec.cost||''}" placeholder="0.00"></div>
+        <div class="fw"><label class="fl">MSRP / MAP ($)</label><input type="number" step="0.01" name="msrp" value="${rec.msrp||''}" placeholder="0.00"></div>
+        <div class="fw"><label class="fl">SUPPLIER</label>
+          <select name="supplier">
+            ${['Stern Pinball','JJP','Spooky','CGC','Other'].map(s=>`<option${(rec.supplier||'Stern Pinball')===s?' selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fw"><label class="fl">STERN AVAILABILITY</label>
+          <select name="stockStatus">
+            ${['In Stock','Low Stock','Out of Stock','Backorder','Almost Gone','Coming Soon','Discontinued',''].map(s=>`<option value="${s}"${(rec.stockStatus||'')===s?' selected':''}>${s||'— Unknown —'}</option>`).join('')}
+          </select>
+        </div>
         <div class="fw"><label class="fl">START QTY</label><input type="number" name="startQty" value="${rec.startQty||0}"></div>
         <div class="fw"><label class="fl">ADDED QTY</label><input type="number" name="addedQty" value="${rec.addedQty||0}"></div>
         <div class="fw"><label class="fl">SOLD QTY</label><input type="number" name="soldQty" value="${rec.soldQty||0}"></div>
         <div class="fw"><label class="fl">ON HAND (auto)</label><input type="number" name="onHand" value="${rec.onHand!==undefined&&rec.onHand!==''?rec.onHand:(Number(rec.startQty||0)+Number(rec.addedQty||0)-Number(rec.soldQty||0))}" readonly style="opacity:.6;cursor:not-allowed"></div>
-        <div class="fw"><label class="fl">INV #s</label><input name="invNumbers" value="${rec.invNumbers||''}"></div>
+        <div class="fw"><label class="fl">REORDER POINT</label><input type="number" name="reorderPoint" value="${rec.reorderPoint||''}" placeholder="Alert when on hand ≤ this"></div>
+        <div class="fw"><label class="fl">LOCATION / BIN</label><input name="location" value="${esc(rec.location||'')}" placeholder="e.g. Shelf A3, Box 2"></div>
+        <div class="fw" style="grid-column:span 2"><label class="fl">LINKED INV #s</label><input name="invNumbers" value="${esc(rec.invNumbers||'')}" placeholder="Invoice numbers this part was sold on"></div>
       </div>
-      <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${rec.notes||''}</textarea></div>
+      <div class="fw" style="margin-bottom:10px"><label class="fl">NOTES</label><textarea name="notes" placeholder="Compatibility notes, build info, etc.">${esc(rec.notes||'')}</textarea></div>
       <div class="br">
         <button class="btn" type="submit">${partsEditing?'Save Changes':'Add Part'}</button>
         ${partsEditing?`<button class="btn ghost" type="button" onclick="partsEditing=null;render()">Cancel</button>`:`<button class="btn ghost" type="button" onclick="this.closest('form').reset();this.closest('form').querySelectorAll('select').forEach(s=>s.selectedIndex=0)" style="opacity:.7">Clear</button>`}
@@ -2399,24 +2411,37 @@ function renderParts() {
     </form>
   </div>
   <div class="panel"><div class="tbl-wrap"><table>
-    <thead><tr><th>ITEM NAME</th><th>PART ID</th><th>COST</th><th>START</th><th>ADDED</th><th>SOLD</th><th>ON HAND</th><th>INV#s</th><th>NOTES</th><th></th></tr></thead>
+    <thead><tr>
+      <th>ITEM NAME</th><th>PART ID</th><th>GAME</th><th>COST</th><th>MSRP</th>
+      <th>STERN AVAIL.</th><th>START</th><th>ADDED</th><th>SOLD</th>
+      <th>ON HAND</th><th>REORDER</th><th>LOCATION</th><th>INV#s</th><th>NOTES</th><th></th>
+    </tr></thead>
     <tbody id="parts-tbody">${(DB.parts||[]).map(r=>{
       const oh = r.onHand!==''&&r.onHand!==undefined ? Number(r.onHand) : (Number(r.startQty||0)+Number(r.addedQty||0)-Number(r.soldQty||0));
-      return `<tr>
-        <td style="font-weight:600">${r.itemName}</td>
-        <td class="m" style="font-family:monospace">${r.partId||'—'}</td>
+      const reorder = r.reorderPoint !== '' && r.reorderPoint !== undefined ? Number(r.reorderPoint) : null;
+      const lowStock = reorder !== null && oh <= reorder;
+      const sternBadge = {'In Stock':'bg-green','Low Stock':'bg-yellow','Out of Stock':'bg-red','Backorder':'bg-orange','Almost Gone':'bg-orange','Coming Soon':'bg-blue','Discontinued':'bg-red'};
+      const margin = (r.cost && r.msrp) ? ((Number(r.msrp)-Number(r.cost)).toFixed(2)) : null;
+      return `<tr style="${lowStock?'background:rgba(239,68,68,.06)':''}">
+        <td style="font-weight:600">${esc(r.itemName)}${lowStock?'<span style="color:var(--red);font-size:10px;margin-left:4px">⚠ LOW</span>':''}</td>
+        <td class="m" style="font-family:monospace;font-size:11px">${esc(r.partId)||'—'}</td>
+        <td class="m" style="font-size:11px">${esc(r.game)||'—'}</td>
         <td>${r.cost?'$'+Number(r.cost).toLocaleString():'—'}</td>
+        <td>${r.msrp?'$'+Number(r.msrp).toLocaleString():'—'}</td>
+        <td>${r.stockStatus?`<span class="badge ${sternBadge[r.stockStatus]||'bg-blue'}" style="font-size:10px">${esc(r.stockStatus)}</span>`:'—'}</td>
         <td class="m">${r.startQty||0}</td>
         <td class="m">${r.addedQty||0}</td>
         <td class="m">${r.soldQty||0}</td>
-        <td><span style="color:${oh>0?'var(--green)':oh<0?'var(--red)':'var(--muted)'};font-weight:700">${oh}</span></td>
-        <td class="m">${r.invNumbers||'—'}</td>
-        <td class="m" style="font-size:11px">${esc(r.notes)||'—'}</td>
+        <td><span style="color:${oh>0?'var(--green)':oh<0?'var(--red)':'var(--muted)'};font-weight:800;font-size:14px">${oh}</span>${reorder!==null?`<span style="font-size:10px;color:var(--muted)"> / ${reorder}</span>`:''}</td>
+        <td class="m" style="font-size:11px">${reorder!==null?reorder:'—'}</td>
+        <td class="m" style="font-size:11px">${esc(r.location)||'—'}</td>
+        <td class="m" style="font-size:11px">${esc(r.invNumbers)||'—'}</td>
+        <td class="m" style="font-size:11px;max-width:140px">${esc(r.notes)||'—'}</td>
         <td><div class="ta">
           <button class="btn sm ghost" data-part-id="${r.id}" onclick="editPartById(this.dataset.partId)">Edit</button>
           <button class="btn sm danger" onclick="delRow('parts','${r.id}')">✕</button>
         </div></td>
-      </tr>`;}).join('')||`<tr><td colspan="10" class="empty">No parts yet.</td></tr>`}
+      </tr>`;}).join('')||`<tr><td colspan="15" class="empty">No parts yet.</td></tr>`}
     </tbody>
   </table></div></div>`;
 }
@@ -4144,97 +4169,184 @@ let partOrderView = 'active'; // 'active' | 'all'
 
 // Known Stern parts with part IDs pre-filled
 const STERN_KNOWN_PARTS = [
-  // Toppers
-  {name:'Godzilla Topper',               id:'502-7145-00'},
-  {name:'Godzilla 70th Topper',          id:'502-7145-T8'},
-  {name:'King Kong Topper',              id:'502-8070-00'},
-  {name:'Jaws Topper',                   id:'502-8039-00'},
-  {name:'Jaws 50th Anniv Topper',        id:'502-8039-AL'},
-  {name:'SW FOE Topper',                 id:'502-8079-00'},
-  {name:'Metallica Remastered Topper',   id:'502-8054-00'},
-  {name:'Walking Dead Topper',           id:'502-8072-00'},
-  {name:'Elvira Topper Kit',             id:'502-7105-00'},
-  {name:'Deadpool Topper',               id:'502-7080-00'},
-  {name:'Black Knight Topper',           id:'502-7095-00'},
-  {name:'John Wick Topper',             id:'502-8050-00'},
-  {name:'Avengers Topper',              id:'502-7131-00'},
-  {name:'Jurassic Park Topper',         id:'502-7111-00'},
-  {name:'Foo Fighters Topper',          id:'502-8031-00'},
-  {name:'Venom Topper',                 id:'502-7174-00'},
-  {name:'Uncanny X-Men Topper',         id:'502-8066-00'},
-  {name:'James Bond Topper',            id:'502-8027-00'},
-  {name:'Iron Maiden Topper - Battle Field', id:'502-7064-00'},
-  // Art Blades
-  {name:'Godzilla Art Blade Kit',        id:'502-7148-00'},
-  {name:'Godzilla 70th Art Blade Kit',   id:'502-7148-T8'},
-  {name:'King Kong Art Blade Kit',       id:'502-8036-Z6'},
-  {name:'Jaws Art Blades',              id:'502-8036-V6'},
-  {name:'SW FOE Art Blades PRO',        id:'502-8075-00'},
-  {name:'Metallica Remastered Cab Expn Lit Blades', id:'502-8013-X6'},
-  {name:'Walking Dead Art Blades',      id:'502-8036-AM'},
-  {name:'Elvira - Curves Art Blades',   id:'502-7085-J2'},
-  {name:'Deadpool Art Blades',          id:''},
-  {name:'Foo Fighters Art Blades Pro',  id:'502-8036-00'},
-  {name:'Venom Art Blades',             id:'502-8036-U2'},
-  {name:'Uncanny X-Men Art Blades',     id:'502-8036-Y6'},
-  {name:'James Bond Art Blades',        id:'502-7160-00'},
-  {name:'Jurassic Park Art Blades',     id:'502-7085-M3'},
-  {name:'SW FOE Cab Exp Light PREM',    id:'502-8087-00'},
-  // Side Armor
-  {name:'Godzilla Side Armor Kit',       id:'502-7147-00'},
-  {name:'Godzilla 70th Side Armor Kit',  id:'502-7147-T8'},
-  {name:'King Kong Side Armor Kit',      id:'502-7086-Z6'},
-  {name:'Jaws Side Armor',              id:'502-8032-00'},
-  {name:'SW FOE Side Armor',            id:'508-8074-00'},
-  {name:'Metallica Remastered Side Armor',id:'502-7129-X6'},
-  {name:'Walking Dead Side Armor',      id:'502-7183-00'},
-  {name:'Elvira Side Armor Kit',        id:'502-7112-00'},
-  {name:'Deadpool Side Armor',          id:'502-7077-00'},
-  {name:'Foo Fighters Side Armor',      id:'502-8029-00'},
-  {name:'Venom Side Armor',             id:'502-7176-00'},
-  {name:'Uncanny X-Men Side Armor',     id:'502-7086-Y6'},
-  {name:'James Bond Side Armor',        id:'502-7159-00'},
-  {name:'Jurassic Park Side Armor',     id:'502-7086-M3'},
-  // Shooter Knobs
-  {name:'Godzilla Shooter Kit',         id:'502-7146-00'},
-  {name:'Godzilla 70th Shooter Kit',    id:'502-7146-T8'},
-  {name:'King Kong Shooter Kit',        id:'502-8031-Z6'},
-  {name:'Jaws Shooter Knob',           id:'502-8033-00'},
-  {name:'SW FOE Shooter Knob',         id:'502-8073-00'},
-  {name:'Metallica Remastered Shooter', id:'502-7133-X6'},
-  {name:'Walking Dead Shooter Knob',   id:'502-7133-AM'},
-  {name:'Elvira Shooter Knob',         id:'502-7107-00'},
-  {name:'Deadpool Shooter Knob',       id:''},
-  {name:'Foo Fighters Shooter Knob',   id:'502-8030-00'},
-  {name:'Venom Shooter Knob',          id:'502-7175-00'},
-  {name:'Uncanny X-Men Shooter Knob',  id:''},
-  {name:'James Bond Shooter Knob',     id:'502-7158-00'},
-  {name:'Jurassic Park Shooter Knob',  id:'502-7101-00'},
-  {name:'Avengers Shooter Knob',       id:'502-7132-00'},
-  {name:'John Wick Shooter Knob',      id:'502-8031-W6'},
-  {name:'Rush Shooter Knob Kit',       id:'502-7150-00'},
-  // Misc Parts
-  {name:'Shaker Motor OPT Kit - Spike',  id:'502-5027-01'},
-  {name:'Playfield High-Rez Glass',      id:'502-6845-00'},
-  {name:'Headphone Adaptor Spike 2',     id:'502-7008-00'},
-  {name:'Expression INT Light Syst SPIKE 3', id:'502-7181-00'},
-  {name:'Side Armor Expsn Light Syst SPIKE 3', id:'502-7182-00'},
-  {name:'Expression Speaker Lighting Pro/Prem', id:'502-8040-00'},
-  {name:'Expression Speaker Lighting LE', id:'502-8041-00'},
-  {name:'QR Arch Kit Pro',              id:'502-5420-00'},
-  {name:'QR Arch Kit Prem',             id:'502-5420-01'},
-  {name:'Long Range OPTO EMITTER',      id:'515-0215-00'},
-  {name:'Long Range OPTO REC',          id:'515-0215-01'},
-  {name:'John Wick Expsn Light Blades', id:'502-8013-W7'},
-  {name:'Rush Expression Lighting',     id:'502-8013-T1'},
-  {name:'Stern Pop Bumper Light',        id:'883-5078-00'},
-  {name:'Stern Pin Alley Sign (Square)', id:'883-5079-00'},
-  {name:'Arcade Pinball Alley Sign (Arch)', id:'883-5105-00'},
-  {name:'Stern Logo Mat',               id:'883-5010-00'},
-  {name:'Stern Infinity Light',         id:'883-5125-00'},
-  {name:'BoF - HD Glass',               id:''},
-  {name:'Door-USA 2 CHT/Cable Spike',   id:'501-5018-173'},
-  {name:'Other (custom)',               id:''},
+  // ── STAR WARS: FALL OF THE EMPIRE ──────────────────────────────
+  {name:'SW FOE Topper',                         id:'502-8079-00', cost:1200, msrp:1499.99, stockStatus:'In Stock', game:'Star Wars FOE'},
+  {name:'SW FOE Shooter Knob',                   id:'502-8073-00', cost:136,  msrp:169.99,  stockStatus:'Low Stock',   game:'Star Wars FOE'},
+  {name:'SW FOE Art Blades PRO',                 id:'502-8075-00', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Star Wars FOE', notes:'Pro Models Only'},
+  {name:'SW FOE Cabinet Expression Lights PREM', id:'502-8087-00', cost:480,  msrp:599.99,  stockStatus:'Backorder',   game:'Star Wars FOE', notes:'Premium Models Only'},
+  {name:'SW FOE Side Armor',                     id:'502-8074-00', cost:216,  msrp:269.99,  stockStatus:'In Stock', game:'Star Wars FOE'},
+  // ── KING KONG ───────────────────────────────────────────────────
+  {name:'King Kong Topper',                      id:'502-8070-00', cost:1120, msrp:1399.99, stockStatus:'In Stock',    game:'King Kong'},
+  {name:'King Kong Shooter Knob',                id:'502-8031-Z6', cost:144,  msrp:179.99,  stockStatus:'In Stock',    game:'King Kong'},
+  {name:'King Kong Art Blades',                  id:'502-8036-Z6', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'King Kong'},
+  {name:'King Kong Side Armor',                  id:'502-7086-Z6', cost:216,  msrp:269.99,  stockStatus:'In Stock',    game:'King Kong'},
+  // ── UNCANNY X-MEN ───────────────────────────────────────────────
+  {name:'Uncanny X-Men Topper',                  id:'502-8066-00', cost:1200, msrp:1499.99, stockStatus:'In Stock',    game:'Uncanny X-Men'},
+  {name:'Uncanny X-Men Shooter Knob',            id:'',            cost:160,  msrp:199.99,  stockStatus:'Coming Soon', game:'Uncanny X-Men'},
+  {name:'Uncanny X-Men Art Blades',              id:'502-8036-Y6', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Uncanny X-Men'},
+  {name:'Uncanny X-Men Side Armor',              id:'502-7086-Y6', cost:216,  msrp:269.99,  stockStatus:'In Stock',    game:'Uncanny X-Men'},
+  // ── WALKING DEAD REMASTERED ─────────────────────────────────────
+  {name:'Walking Dead Remastered Topper',        id:'502-8072-00', cost:800,  msrp:999.99,  stockStatus:'In Stock',    game:'Walking Dead'},
+  {name:'Walking Dead Shooter Knob',             id:'502-7133-AM', cost:160,  msrp:199.99,  stockStatus:'In Stock',    game:'Walking Dead'},
+  {name:'Walking Dead Art Blades',               id:'502-8036-AM', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Walking Dead'},
+  {name:'Walking Dead Side Armor',               id:'502-7183-00', cost:216,  msrp:269.99,  stockStatus:'In Stock',    game:'Walking Dead'},
+  {name:'Walking Dead Inside Cabinet Exp Lights',id:'502-7181-00', cost:240,  msrp:299.99,  stockStatus:'Low Stock',   game:'Walking Dead'},
+  {name:'Walking Dead Outside Armor Exp Lights', id:'502-7182-00', cost:200,  msrp:249.99,  stockStatus:'In Stock',    game:'Walking Dead', notes:'Requires Side Armor + Internal Cabinet Kit'},
+  // ── VENOM ───────────────────────────────────────────────────────
+  {name:'Venom Topper',                          id:'502-7174-00', cost:1039, msrp:1299.99, stockStatus:'In Stock',    game:'Venom'},
+  {name:'Venom Art Blades',                      id:'502-8036-U2', cost:79.99,msrp:99.99,   stockStatus:'Low Stock',   game:'Venom'},
+  {name:'Venom Shooter Knob',                    id:'502-7175-00', cost:159.99,msrp:199.99, stockStatus:'In Stock',    game:'Venom'},
+  {name:'Venom Side Armor',                      id:'502-7176-00', cost:319.99,msrp:399.99, stockStatus:'In Stock',    game:'Venom'},
+  // ── JOHN WICK ───────────────────────────────────────────────────
+  {name:'John Wick Topper',                      id:'502-8050-00', cost:1199.99,msrp:1499.99,stockStatus:'Out of Stock',game:'John Wick'},
+  {name:'John Wick Expression Light Kit',        id:'502-8013-W7', cost:480,  msrp:599.99,  stockStatus:'In Stock',    game:'John Wick'},
+  {name:'John Wick Shooter Knob',                id:'502-8031-W6', cost:159.99,msrp:199.99, stockStatus:'In Stock',    game:'John Wick'},
+  {name:'John Wick Side Armor',                  id:'502-8044-00', cost:216,  msrp:269.99,  stockStatus:'In Stock',    game:'John Wick'},
+  // ── JAWS ────────────────────────────────────────────────────────
+  {name:'Jaws Topper',                           id:'502-8039-00', cost:800,  msrp:999.99,  stockStatus:'Out of Stock',game:'Jaws'},
+  {name:'Jaws Shooter Knob',                     id:'502-8033-00', cost:112,  msrp:149.99,  stockStatus:'In Stock',    game:'Jaws'},
+  {name:'Jaws Art Blades',                        id:'502-8036-V6', cost:75,   msrp:99.99,   stockStatus:'In Stock',    game:'Jaws'},
+  {name:'Jaws Side Armor',                        id:'502-8032-00', cost:185,  msrp:249.99,  stockStatus:'In Stock',    game:'Jaws'},
+  {name:'Jaws 50th Anniversary Topper',           id:'502-8039-AL', cost:880,  msrp:999.99,  stockStatus:'Orders Closed',game:'Jaws', notes:'Preorder only — orders closed 12/31/2025'},
+  // ── METALLICA REMASTERED ────────────────────────────────────────
+  {name:'Metallica Remastered Topper',           id:'502-8054-00', cost:800,  msrp:999.99,  stockStatus:'In Stock',    game:'Metallica'},
+  {name:'Metallica Remastered Shooter Knob',     id:'502-7133-X6', cost:180,  msrp:224.99,  stockStatus:'Low Stock',   game:'Metallica'},
+  {name:'Metallica Remastered Side Armor',        id:'502-7129-X6', cost:320,  msrp:399.99,  stockStatus:'In Stock',    game:'Metallica'},
+  {name:'Metallica Remastered Cabinet Exp Lights',id:'502-8013-X6', cost:480,  msrp:599.99,  stockStatus:'Out of Stock',game:'Metallica'},
+  // ── FOO FIGHTERS ────────────────────────────────────────────────
+  {name:'Foo Fighters Topper',                   id:'502-8031-00', cost:1500, msrp:1999,    stockStatus:'Low Stock',   game:'Foo Fighters'},
+  {name:'Foo Fighters Shooter Knob',             id:'502-8030-00', cost:169,  msrp:224.99,  stockStatus:'In Stock',    game:'Foo Fighters'},
+  {name:'Foo Fighters Art Blades Pro',           id:'502-8038-00', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Foo Fighters', notes:'Pro Only'},
+  {name:'Foo Fighters Side Armor',               id:'502-8029-00', cost:185,  msrp:249.99,  stockStatus:'In Stock',    game:'Foo Fighters'},
+  {name:'Foo Fighters Expression Light Kit PREM',id:'502-8013-U7', cost:375,  msrp:499,     stockStatus:'Out of Stock',game:'Foo Fighters', notes:'Premium Only'},
+  // ── STRANGER THINGS ─────────────────────────────────────────────
+  {name:'Stranger Things Topper',                id:'502-7113-00', cost:509.99,msrp:649.99, stockStatus:'In Stock',    game:'Stranger Things'},
+  {name:'Stranger Things Shooter Knob',          id:'502-7114-00', cost:135,  msrp:179.99,  stockStatus:'In Stock',    game:'Stranger Things'},
+  {name:'Stranger Things Art Blades',            id:'502-7085-Q1', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Stranger Things'},
+  {name:'Stranger Things Side Armor',            id:'502-7115-00', cost:217.99,msrp:289.99, stockStatus:'In Stock',    game:'Stranger Things'},
+  {name:'Stranger Things UV Light Kit Pro',      id:'502-7118-Q1', cost:220,  msrp:279.99,  stockStatus:'Low Stock',   game:'Stranger Things'},
+  {name:'Stranger Things UV Light Kit Prem/LE',  id:'502-7118-Q2', cost:220.99,msrp:279.99, stockStatus:'Out of Stock',game:'Stranger Things'},
+  // ── JAMES BOND ──────────────────────────────────────────────────
+  {name:'James Bond Topper',                     id:'502-8027-00', cost:749.99,msrp:999.99, stockStatus:'In Stock',    game:'James Bond'},
+  {name:'James Bond Art Blades',                 id:'502-7160-00', cost:74.99,msrp:99.99,   stockStatus:'Out of Stock',game:'James Bond'},
+  {name:'James Bond Shooter Knob',               id:'502-7158-00', cost:134.99,msrp:179.99, stockStatus:'Low Stock',   game:'James Bond'},
+  {name:'James Bond Side Armor',                 id:'502-7159-00', cost:165.99,msrp:249.99, stockStatus:'In Stock',    game:'James Bond'},
+  // ── RUSH ────────────────────────────────────────────────────────
+  {name:'Rush Topper',                           id:'502-7149-00', cost:1249.99,msrp:1699.99,stockStatus:'In Stock',   game:'Rush', notes:'No future builds'},
+  {name:'Rush Shooter Knob',                     id:'502-7150-00', cost:118.99,msrp:159.99, stockStatus:'In Stock',    game:'Rush', notes:'No future builds'},
+  {name:'Rush Side Armor',                       id:'502-7151-00', cost:184.99,msrp:249.99, stockStatus:'In Stock',    game:'Rush', notes:'No future builds'},
+  {name:'Rush Expression Lighting System',       id:'502-8013-T1', cost:374.99,msrp:499.99, stockStatus:'Out of Stock',game:'Rush', notes:'No future builds'},
+  // ── GODZILLA ────────────────────────────────────────────────────
+  {name:'Godzilla Topper',                       id:'502-7145-00', cost:749.99,msrp:999.99, stockStatus:'In Stock',    game:'Godzilla'},
+  {name:'Godzilla Shooter Knob',                 id:'502-7146-00', cost:134.99,msrp:179.99, stockStatus:'In Stock',    game:'Godzilla'},
+  {name:'Godzilla Art Blades',                   id:'502-7148-00', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Godzilla'},
+  {name:'Godzilla Side Armor',                   id:'502-7147-00', cost:217.99,msrp:289.99, stockStatus:'In Stock',    game:'Godzilla'},
+  // ── GODZILLA 70TH ANNIVERSARY ───────────────────────────────────
+  {name:'Godzilla 70th Topper',                  id:'502-7145-T8', cost:749.99,msrp:999.99, stockStatus:'In Stock',    game:'Godzilla 70th', notes:'No future builds'},
+  {name:'Godzilla 70th Shooter Knob',            id:'502-7146-T8', cost:134.99,msrp:179.99, stockStatus:'In Stock',    game:'Godzilla 70th'},
+  {name:'Godzilla 70th Art Blades',              id:'502-7148-T8', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Godzilla 70th'},
+  {name:'Godzilla 70th Side Armor',              id:'502-7147-T8', cost:217.99,msrp:289.99, stockStatus:'Low Stock',   game:'Godzilla 70th', notes:'No future builds'},
+  // ── MANDALORIAN ─────────────────────────────────────────────────
+  {name:'Mandalorian Topper',                    id:'502-7143-00', cost:1499.99,msrp:1999.99,stockStatus:'Low Stock',  game:'Mandalorian', notes:'No future builds'},
+  {name:'Mandalorian Shooter Knob',              id:'502-7141-00', cost:94.99,msrp:129.99,  stockStatus:'In Stock',    game:'Mandalorian', notes:'No future builds'},
+  {name:'Mandalorian Art Blades',                id:'502-7144-00', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Mandalorian', notes:'No future builds'},
+  {name:'Mandalorian Side Armor',                id:'502-7142-00', cost:217.99,msrp:289.99, stockStatus:'Out of Stock',game:'Mandalorian'},
+  // ── AVENGERS ────────────────────────────────────────────────────
+  {name:'Avengers Topper',                       id:'502-7131-00', cost:549.99,msrp:749.99, stockStatus:'In Stock',    game:'Avengers'},
+  {name:'Avengers Shooter Knob',                 id:'502-7132-00', cost:134.99,msrp:179.99, stockStatus:'In Stock',    game:'Avengers'},
+  {name:'Avengers Art Blades',                   id:'502-7085-R2', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Avengers'},
+  {name:'Avengers Side Armor',                   id:'502-7086-R3', cost:164.99,msrp:249.99, stockStatus:'In Stock',    game:'Avengers'},
+  // ── ELVIRA ──────────────────────────────────────────────────────
+  {name:'Elvira Topper Kit',                     id:'502-7105-00', cost:749.99,msrp:999.99, stockStatus:'Out of Stock',game:'Elvira'},
+  {name:'Elvira Shooter Knob',                   id:'502-7107-00', cost:127.99,msrp:169.99, stockStatus:'Low Stock',   game:'Elvira'},
+  {name:'Elvira Art Blades',                     id:'502-7085-J2', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Elvira'},
+  {name:'Elvira Side Armor',                     id:'502-7112-00', cost:200,  msrp:269.99,  stockStatus:'In Stock',    game:'Elvira'},
+  // ── BLACK KNIGHT ────────────────────────────────────────────────
+  {name:'Black Knight Topper',                   id:'502-7095-00', cost:1099, msrp:1499.99, stockStatus:'In Stock',    game:'Black Knight', notes:'No future builds'},
+  {name:'Black Knight Art Blades',               id:'502-7085-N3', cost:74.99,msrp:99.99,   stockStatus:'Low Stock',   game:'Black Knight', notes:'No future builds'},
+  {name:'Black Knight Shooter Knob',             id:'502-7094-00', cost:128,  msrp:169.99,  stockStatus:'Low Stock',   game:'Black Knight', notes:'No future builds'},
+  {name:'Black Knight Side Armor',               id:'502-7086-N3', cost:165.99,msrp:249.99, stockStatus:'Out of Stock',game:'Black Knight', notes:'No future builds'},
+  // ── JURASSIC PARK ───────────────────────────────────────────────
+  {name:'Jurassic Park Topper',                  id:'502-7111-00', cost:549.99,msrp:749.99, stockStatus:'In Stock',    game:'Jurassic Park'},
+  {name:'Jurassic Park Shooter Knob',            id:'502-7101-00', cost:134.99,msrp:179.99, stockStatus:'In Stock',    game:'Jurassic Park'},
+  {name:'Jurassic Park Art Blades',              id:'502-7085-M3', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Jurassic Park'},
+  {name:'Jurassic Park Side Armor',              id:'502-7086-M3', cost:164.99,msrp:249.99, stockStatus:'In Stock',    game:'Jurassic Park'},
+  // ── IRON MAIDEN ─────────────────────────────────────────────────
+  {name:'Iron Maiden Topper (Aces High)',         id:'502-7064-00', cost:749.99,msrp:999.99, stockStatus:'In Stock',    game:'Iron Maiden'},
+  {name:'Iron Maiden Art Blades',                id:'502-7068-00', cost:74.99,msrp:99.99,   stockStatus:'Out of Stock',game:'Iron Maiden'},
+  {name:'Iron Maiden Shooter Knob',              id:'502-7067-00', cost:79.99,msrp:109.99,  stockStatus:'Almost Gone', game:'Iron Maiden'},
+  {name:'Iron Maiden Mummy Fist Side Armor',     id:'502-7071-00', cost:200,  msrp:269.99,  stockStatus:'Out of Stock',game:'Iron Maiden'},
+  // ── DEADPOOL ────────────────────────────────────────────────────
+  {name:'Deadpool Topper',                       id:'502-7080-00', cost:534.99,msrp:699.99, stockStatus:'Out of Stock',game:'Deadpool'},
+  {name:'Deadpool Shooter Knob',                 id:'502-7072-00', cost:79.99,msrp:109.99,  stockStatus:'Almost Gone', game:'Deadpool'},
+  {name:'Deadpool Pop Bumper Kit',               id:'502-7075-00', cost:21.99,msrp:39.99,   stockStatus:'In Stock',    game:'Deadpool'},
+  {name:'Deadpool Art Blades',                   id:'502-7073-00', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Deadpool'},
+  {name:'Deadpool Side Armor',                   id:'502-7077-00', cost:199.99,msrp:269.99, stockStatus:'In Stock',    game:'Deadpool'},
+  // ── STAR WARS (Original) ─────────────────────────────────────────
+  {name:'Star Wars Shooter Rod',                 id:'502-7048-00', cost:127.99,msrp:169.99, stockStatus:'In Stock',    game:'Star Wars Classic'},
+  {name:'Star Wars Art Blades Set of 3',         id:'502-7049-00', cost:150,  msrp:174.99,  stockStatus:'In Stock',    game:'Star Wars Classic'},
+  {name:'Star Wars Art Blades Set 1 (Han/Yoda)', id:'502-7049-01', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Star Wars Classic'},
+  {name:'Star Wars Art Blades Set 2 (Vader/Leia)',id:'502-7049-02',cost:74.99,msrp:99.99,   stockStatus:'Out of Stock',game:'Star Wars Classic'},
+  {name:'Star Wars Art Blades Set 3 (Storm/Hunt)',id:'502-7049-03',cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Star Wars Classic'},
+  {name:'Star Wars Side Armor',                  id:'502-7046-00', cost:199.99,msrp:269.99, stockStatus:'In Stock',    game:'Star Wars Classic'},
+  {name:'Star Wars Comic Art Blades',            id:'502-7109-00', cost:74.99,msrp:99.99,   stockStatus:'In Stock',    game:'Star Wars Classic'},
+  // ── UNIVERSAL / MISC ────────────────────────────────────────────
+  {name:'Spike 2 Expression Speaker Light Pro/Prem',id:'502-8040-00',cost:160,msrp:199.99, stockStatus:'Out of Stock',game:'Universal'},
+  {name:'Spike 2 Expression Speaker Light LE',   id:'502-8041-00', cost:160,  msrp:199.99,  stockStatus:'Out of Stock',game:'Universal'},
+  {name:'Shaker Motor Spike',                    id:'502-5027-01', cost:115,  msrp:144.99,  stockStatus:'Out of Stock',game:'Universal'},
+  {name:'Shaker Motor SAM',                      id:'502-5027-00', cost:115,  msrp:144.99,  stockStatus:'Out of Stock',game:'Universal', notes:'No future builds'},
+  {name:'Headphone Jack Spike 2+3',              id:'502-7008-00', cost:73.99,msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'Headphone Kit Spike 1',                 id:'502-6953-00', cost:73.99,msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'High Resolution Playfield Glass',       id:'502-6845-00', cost:159.99,msrp:239.99, stockStatus:'In Stock',    game:'Universal'},
+  {name:'Insider Connected Kit Pro',             id:'502-5420-00', cost:149.99,msrp:199.99, stockStatus:'In Stock',    game:'Universal'},
+  {name:'Insider Connected Kit Prem',            id:'502-5420-01', cost:149.99,msrp:199.99, stockStatus:'In Stock',    game:'Universal'},
+  {name:'Batman Replacement Arch',               id:'502-8008-00', cost:94.99,msrp:129.99,  stockStatus:'Out of Stock',game:'Universal'},
+  {name:'Star Wars Prem/LE Replacement Arch',    id:'502-8010-00', cost:94.99,msrp:129.99,  stockStatus:'In Stock',    game:'Universal'},
+  {name:'Expression Topper Base',                id:'502-8049-00', cost:319.99,msrp:399.99, stockStatus:'In Stock',    game:'Universal'},
+  {name:'Star Wars Topper Plate',                id:'545-0654-J7', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'Stern Topper Plate (Universal)',         id:'545-0654-00', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'Godzilla Topper Plate',                 id:'545-0654-T6', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'Deadpool Topper Plate',                 id:'545-0654-K2', cost:80,   msrp:99.99,   stockStatus:'In Stock',    game:'Universal'},
+  {name:'Wrinkle Black Teardrop Side Armor',     id:'502-8048-00', cost:49.99,msrp:69.99,   stockStatus:'In Stock',    game:'Universal', notes:'Not compatible on Spike 3 cabinets'},
+  {name:'Wrinkle Black Premium Side Armor',      id:'502-6826-00', cost:54.99,msrp:74.99,   stockStatus:'In Stock',    game:'Universal', notes:'Not compatible on Spike 3 cabinets'},
+  {name:'Stern Pop Bumper Light',                id:'883-5078-00', cost:335,  msrp:'',       stockStatus:'',            game:'Universal'},
+  {name:'Stern Pin Alley Sign (Square)',          id:'883-5079-00', cost:1500, msrp:'',       stockStatus:'',            game:'Universal'},
+  {name:'Arcade Pinball Alley Sign (Arch)',       id:'883-5105-00', cost:2650, msrp:'',       stockStatus:'',            game:'Universal'},
+  {name:'Stern Logo Mat',                        id:'883-5010-00', cost:60,   msrp:'',       stockStatus:'',            game:'Universal'},
+  {name:'Stern Infinity Light',                  id:'883-5125-00', cost:149.99,msrp:'',      stockStatus:'',            game:'Universal'},
+  {name:'Long Range OPTO EMITTER',               id:'515-0215-00', cost:7.42,  msrp:'',      stockStatus:'',            game:'Universal'},
+  {name:'Long Range OPTO REC',                   id:'515-0215-01', cost:7.88,  msrp:'',      stockStatus:'',            game:'Universal'},
+  {name:'Door-USA 2 CHT/Cable Spike',            id:'501-5018-173',cost:119,   msrp:'',      stockStatus:'',            game:'Universal'},
+  {name:'BoF - HD Glass',                        id:'',            cost:120,   msrp:'',      stockStatus:'',            game:'Universal'},
+  // ── UNIVERSAL ACCESSORIES / MERCH ────────────────────────────────
+  {name:'Stern Modern Pinball Alley Sign',        id:'883-5079-00', cost:1500,  msrp:1999.99, stockStatus:'In Stock',    game:'Accessories', notes:'65"x18"x8.5" - 35lbs'},
+  {name:'Stern Swivel Bar Stool',                 id:'883-5053-00', cost:97,    msrp:129.99,  stockStatus:'Low Stock',   game:'Accessories'},
+  {name:'Stern Pinball Player Mat',               id:'883-5010-00', cost:60,    msrp:79.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Stern Pinball Glass Cover',              id:'883-5003-00', cost:50,    msrp:69.99,   stockStatus:'Low Stock',   game:'Accessories'},
+  {name:'Stern Jurassic Park Player Mat',         id:'883-5084-00', cost:65,    msrp:89.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Stern Jurassic Park Dust Cover',         id:'883-5083-00', cost:60,    msrp:79.99,   stockStatus:'Out of Stock',game:'Accessories'},
+  {name:'Elvira House of Horrors Players Mat',    id:'883-5092-00', cost:65,    msrp:89.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Elvira House of Horrors Dust Cover',     id:'883-5087-00', cost:60,    msrp:79.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Elvira House of Horrors Stool',          id:'883-5093-00', cost:130,   msrp:139.99,  stockStatus:'Out of Stock',game:'Accessories', notes:'No future builds'},
+  {name:'Stern Pinball Alley Arcade Sign',        id:'883-5105-00', cost:2650,  msrp:3500,    stockStatus:'In Stock',    game:'Accessories', notes:'90"x36"x9" - 22lbs'},
+  {name:'Stern Street Sign',                      id:'883-5076-00', cost:20,    msrp:29.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'JAWS Banner',                            id:'883-5113-00', cost:75,    msrp:99.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Elvira Banner',                          id:'883-5117-00', cost:75,    msrp:99.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'King Kong Banner',                       id:'883-5151-00', cost:75,    msrp:99.99,   stockStatus:'In Stock',    game:'Accessories', notes:'Alt banner with QR code removed'},
+  {name:'Jurassic Park Banner',                   id:'883-5122-00', cost:75,    msrp:99.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'3 Pack Mini Pop Bumper Lights',          id:'883-5104-00', cost:'',    msrp:299.99,  stockStatus:'In Stock',    game:'Accessories', notes:'Online Exclusive — no wholesale price'},
+  {name:'Godzilla 70th Pop Bumper 3 Pack',        id:'883-5120-00', cost:239.99,msrp:299.99,  stockStatus:'Low Stock',   game:'Accessories', notes:'Limited run of 70 — no future builds'},
+  {name:'Stern Infinity Sign',                    id:'883-5125-00', cost:127.50,msrp:199.99,  stockStatus:'In Stock',    game:'Accessories', notes:'24"x15"x5/8"'},
+  {name:'Jaws Pinball Dust Cover',                id:'883-5142-00', cost:60,    msrp:79.99,   stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Play Pinball Sign',                      id:'883-5129-00', cost:320.99,msrp:349,     stockStatus:'In Stock',    game:'Accessories', notes:'31"Lx16"Hx2"W'},
+  {name:'Stern Pinball Crossing Sign',            id:'883-5141-00', cost:22.50, msrp:30,      stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Stern Tilt Sign',                        id:'883-5139-00', cost:22.50, msrp:30,      stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Stern Pinball Zone Sign',                id:'883-5140-00', cost:22.50, msrp:30,      stockStatus:'In Stock',    game:'Accessories'},
+  {name:'Stern Light Up Logo',                    id:'883-5048-00', cost:375,   msrp:399.99,  stockStatus:'In Stock',    game:'Accessories', notes:'24"x13.5"x1"'},
+  {name:'Black LED Translite Frame',              id:'883-5128-00', cost:160,   msrp:199.99,  stockStatus:'In Stock',    game:'Accessories', notes:'New and improved design'},
+  {name:'Stern Logo Neon Sign',                   id:'883-5161-00', cost:280,   msrp:349.99,  stockStatus:'In Stock',    game:'Accessories'},
+  {name:'High Performance Power Supply Kit',      id:'502-6846-00', cost:240,   msrp:299.99,  stockStatus:'In Stock',    game:'Accessories', notes:'Retrofit kit includes power supply and mounting bracket'},
+  {name:'Other (custom)',                         id:'',            cost:'',    msrp:'',      stockStatus:'',            game:''},
 ];
 
 function renderPartOrders() {
@@ -4251,9 +4363,25 @@ function renderPartOrders() {
     cancelled:  'bg-red',
   };
 
-  const knownOpts = STERN_KNOWN_PARTS.map(p =>
-    `<option value="${esc(p.name)}" data-part-id="${esc(p.id)}">${esc(p.name)}${p.id?' ('+p.id+')':''}</option>`
-  ).join('');
+  // Group parts by game for organized dropdown
+  const gameGroups = {};
+  STERN_KNOWN_PARTS.forEach(p => {
+    const g = p.game || 'Other';
+    if (!gameGroups[g]) gameGroups[g] = [];
+    gameGroups[g].push(p);
+  });
+  const stockIcon = s => s==='In Stock'?'✅':s==='Low Stock'?'🟡':s==='Out of Stock'?'🔴':s==='Backorder'?'🟠':s==='Almost Gone'?'⚠️':s==='Coming Soon'?'🔵':s==='Orders Closed'?'⛔':'';
+  const knownOpts = '<option value="">— Select a known Stern part —</option>' +
+    Object.entries(gameGroups).map(([game, parts]) =>
+      `<optgroup label="${esc(game)}">`+
+      parts.map(p => {
+        const icon = stockIcon(p.stock);
+        const costStr = p.cost ? ' — $'+p.cost+' wholesale' : '';
+        const stockStr = p.stock ? ' ['+p.stock+']' : '';
+        return `<option value="${esc(p.name)}" data-part-id="${esc(p.id)}" data-cost="${p.cost||''}" data-stock="${esc(p.stock||'')}" data-notes="${esc(p.notes||'')}">${icon} ${esc(p.name)}${p.id?' ('+p.id+')':''}${costStr}${stockStr}</option>`;
+      }).join('')+
+      '</optgroup>'
+    ).join('');
 
   const rec = partOrderEditing || {};
 
@@ -4266,11 +4394,11 @@ function renderPartOrders() {
     <form onsubmit="submitPartOrder(event)">
       <div class="grid">
         <div class="fw" style="grid-column:1/-1">
-          <label class="fl">PART NAME</label>
+          <label class="fl">PART NAME — grouped by game</label>
           <select id="po-known-select" onchange="onPartOrderSelect(this)" style="margin-bottom:6px">
-            <option value="">— Select a known Stern part or choose Custom below —</option>
             ${knownOpts}
           </select>
+          <div id="po-stock-info" style="display:none;gap:8px;align-items:center;padding:6px 10px;background:var(--panel2);border-radius:7px;font-size:12px;margin-top:4px"></div>
         </div>
         <div class="fw"><label class="fl">ITEM NAME</label><input name="itemName" id="po-item-name" value="${esc(rec.itemName||'')}" required placeholder="Part name"></div>
         <div class="fw"><label class="fl">PART ID / SKU</label><input name="partId" id="po-part-id" value="${esc(rec.partId||'')}" placeholder="e.g. 502-7145-00"></div>
@@ -4341,10 +4469,22 @@ function renderPartOrders() {
 function onPartOrderSelect(sel) {
   const opt = sel.options[sel.selectedIndex];
   if (!opt || !opt.value) return;
-  const partName = opt.value;
-  const partId   = opt.dataset.partId || '';
-  document.getElementById('po-item-name').value = partName;
-  document.getElementById('po-part-id').value   = partId;
+  document.getElementById('po-item-name').value = opt.value;
+  document.getElementById('po-part-id').value   = opt.dataset.partId || '';
+  // Auto-fill cost if available
+  if (opt.dataset.cost) {
+    const costEl = document.querySelector('input[name="unitCost"]');
+    if (costEl && !costEl.value) costEl.value = opt.dataset.cost;
+  }
+  // Show stock status warning
+  const infoEl = document.getElementById('po-stock-info');
+  if (infoEl) {
+    const stock = opt.dataset.stock || '';
+    const notes = opt.dataset.notes || '';
+    const stockIcon = {'In Stock':'✅','Low Stock':'🟡 Low Stock','Out of Stock':'🔴 Out of Stock — may be backordered','Backorder':'🟠 Currently on Backorder','Almost Gone':'⚠️ Almost Gone','Coming Soon':'🔵 Coming Soon','Orders Closed':'⛔ Orders Closed'}[stock] || '';
+    infoEl.innerHTML = [stockIcon ? `<span style="font-weight:700">${stockIcon}</span>` : '', notes ? `<span style="color:var(--muted);font-size:11px">${esc(notes)}</span>` : ''].filter(Boolean).join(' &nbsp;|&nbsp; ');
+    infoEl.style.display = (stockIcon || notes) ? 'flex' : 'none';
+  }
 }
 
 function editPartOrderById(id) {
