@@ -351,7 +351,7 @@ const SEED = {
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.44'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.45'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -3734,62 +3734,75 @@ function renderFulfillment() {
   </div>` : '';
 
   // Standard fields form
-  const formFields = FULFIL_FIELDS.map(f => {
-    if (f.type === 'select') return `<div class="fw"><label class="fl">${f.l}</label><select name="${f.k}" onchange="fulfillmentFieldChanged()">${(f.opts||[]).map(o=>`<option${(rec[f.k]||f.def||'')===o?' selected':''}>${o}</option>`).join('')}</select></div>`;
-    if (f.type === 'datalist') return `<div class="fw"><label class="fl">${f.l}</label><input name="${f.k}" list="dl-${f.k}" value="${rec[f.k]||f.def||''}" placeholder="Type or choose…" oninput="fulfillmentFieldChanged()"><datalist id="dl-${f.k}">${(f.opts||[]).map(o=>`<option value="${o}">`).join('')}</datalist></div>`;
-    if (f.type === 'notes') return `<div class="fw" style="grid-column:1/-1"><label class="fl">${f.l}</label><textarea name="${f.k}" rows="2" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);resize:vertical" oninput="fulfillmentFieldChanged()">${(rec[f.k]||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>`;
-    if (f.type === 'ship_to_block') {
-      if (rec.hasShipTo !== 'yes' || !rec.shipToAddress) return '';
-      const stLine1 = rec.shipToAddress || '';
-      const stLine2 = [rec.shipToCity, rec.shipToState, rec.shipToZip].filter(Boolean).join(', ');
-      const billLine1 = rec.customerAddress || '';
-      const billLine2 = [rec.customerCity, rec.customerState, rec.customerZip].filter(Boolean).join(', ');
-      return `<div style="grid-column:1/-1;margin:4px 0 8px">
-        <div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap">
-          <div style="flex:1;min-width:200px;padding:10px 14px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)">
-            <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">🧾 Bill To</div>
-            <div style="font-size:13px;font-weight:600">${rec.customerName||''}</div>
-            ${rec.businessName?`<div style="font-size:11px;color:var(--muted)">${rec.businessName}</div>`:''}
-            <div style="font-size:12px;margin-top:4px">${billLine1}</div>
-            ${billLine2?`<div style="font-size:12px;color:var(--muted)">${billLine2}</div>`:''}
-          </div>
-          <div style="display:flex;align-items:center;font-size:18px;color:var(--muted);padding:0 4px">≠</div>
-          <div style="flex:1;min-width:200px;padding:10px 14px;border-radius:8px;border:2px solid var(--accent);background:rgba(99,102,241,.08)">
-            <div style="font-size:10px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">📦 Ship To — DIFFERENT ADDRESS</div>
-            <div style="font-size:13px;font-weight:600">${rec.shipToName||rec.customerName||''}</div>
-            ${rec.shipToPhone?`<div style="font-size:11px;color:var(--muted)">${rec.shipToPhone}</div>`:''}
-            <div style="font-size:12px;margin-top:4px">${stLine1}</div>
-            ${stLine2?`<div style="font-size:12px;color:var(--muted)">${stLine2}</div>`:''}
-          </div>
+  // Build form in clean grouped sections instead of auto-grid
+  const s = rec; // shorthand
+  const curSerial = s.serialNumber||'';
+  const mn = (s.machineName||'').toLowerCase().trim();
+  const serialMatches = mn ? (DB.inventory||[]).filter(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn) : [];
+  let serialOpts = `<option value="">— select serial —</option>`;
+  serialMatches.forEach(i => {
+    const label = i.serialNumber ? `SN: ${i.serialNumber}` : '(no serial)';
+    const sub = i.location ? ` · ${i.location}` : '';
+    const st = i.status !== 'in_stock' && i.status !== 'reserved' ? ` · ${i.status}` : '';
+    const sel = curSerial && curSerial === i.serialNumber ? ' selected' : '';
+    serialOpts += `<option value="${esc(i.serialNumber||'')}"${sel}>${esc(label+sub+st)}</option>`;
+  });
+  if (curSerial && !serialMatches.find(i=>i.serialNumber===curSerial)) serialOpts += `<option value="${esc(curSerial)}" selected>${esc(curSerial)} (current)</option>`;
+
+  const carrierOpts = ['XPO Logistics','Forward Air','R+L Carriers','TForce Freight','Estes Express','Dayton Freight','Pitt Ohio','ABF Freight','Roadrunner Freight','Oak Harbor Freight','Daylight Transport','Total Transportation','Sutton Transport','Tax Airfreight','Magnum Logistics','Mountain Valley Express','Dedicated Delivery Professionals','FedEx','USPS','Other'];
+
+  const shipToBlock = (s.hasShipTo === 'yes' && s.shipToAddress) ? `
+    <div style="grid-column:1/-1;margin:2px 0 4px">
+      <div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px;padding:10px 14px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">🧾 Bill To</div>
+          <div style="font-size:13px;font-weight:600">${esc(s.customerName||'')}</div>
+          <div style="font-size:12px;margin-top:3px">${esc(s.customerAddress||'')}${s.customerCity?'<br>'+esc([s.customerCity,s.customerState,s.customerZip].filter(Boolean).join(', ')):''}</div>
         </div>
-        <div style="margin-top:8px;padding:6px 12px;background:#b45309;color:#fff;border-radius:6px;font-size:11px;font-weight:700;display:inline-block">
-          ⚠️ SHIP TO ADDRESS DIFFERS FROM BILLING — verify before shipping
+        <div style="display:flex;align-items:center;font-size:18px;color:var(--muted)">≠</div>
+        <div style="flex:1;min-width:180px;padding:10px 14px;border-radius:8px;border:2px solid var(--accent);background:rgba(59,130,246,.08)">
+          <div style="font-size:10px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">📦 Ship To</div>
+          <div style="font-size:13px;font-weight:600">${esc(s.shipToName||s.customerName||'')}</div>
+          <div style="font-size:12px;margin-top:3px">${esc(s.shipToAddress||'')}${s.shipToCity?'<br>'+esc([s.shipToCity,s.shipToState,s.shipToZip].filter(Boolean).join(', ')):''}</div>
         </div>
-      </div>`;
-    }
-    if (f.type === 'serial_picker') {
-      const mn = (rec.machineName||'').toLowerCase().trim();
-      const matches = mn ? (DB.inventory||[]).filter(i => i.status !== 'sold' && (i.machineName||'').toLowerCase().trim() === mn) : [];
-      const curSerial = rec.serialNumber||'';
-      let opts = `<option value="">— select serial —</option>`;
-      matches.forEach(i => {
-        const label = i.serialNumber ? `SN: ${i.serialNumber}` : '(no serial)';
-        const sub = i.location ? ` · ${i.location}` : '';
-        const st = i.status !== 'in_stock' && i.status !== 'reserved' ? ` · ${i.status}` : '';
-        const sel = curSerial && curSerial === i.serialNumber ? ' selected' : '';
-        opts += `<option value="${i.serialNumber||''}"${sel}>${label}${sub}${st}</option>`;
-      });
-      if (curSerial && !matches.find(i=>i.serialNumber===curSerial)) opts += `<option value="${curSerial}" selected>${curSerial} (current)</option>`;
-      const manualStyle = matches.length ? 'display:none' : '';
-      return `<div class="fw" id="ful-serial-wrap">
-        <label class="fl">${f.l}</label>
-        ${matches.length ? `<select id="ful-serial-sel" onchange="document.getElementById('ful-serial-hidden').value=this.options[this.selectedIndex].value;document.getElementById('ful-serial-txt').value=this.options[this.selectedIndex].value;fulfillmentFieldChanged();" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px;margin-bottom:6px">${opts}</select>` : ''}
-        <input type="text" id="ful-serial-txt" value="${curSerial}" placeholder="${matches.length?'Or type custom serial…':'Enter serial…'}" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:${matches.length?'12':'13'}px" oninput="document.getElementById('ful-serial-hidden').value=this.value;fulfillmentFieldChanged()">
-        <input type="hidden" name="${f.k}" id="ful-serial-hidden" value="${curSerial}">
-      </div>`;
-    }
-    return `<div class="fw"><label class="fl">${f.l}</label><input type="${f.type||'text'}" name="${f.k}" value="${(rec[f.k]||f.def||'').replace ? (rec[f.k]||'').replace(/"/g,'&quot;') : (rec[f.k]||f.def||'')}" ${f.req?'required':''} oninput="fulfillmentFieldChanged()"></div>`;
-  }).join('');
+      </div>
+      <div style="margin-top:6px;padding:5px 10px;background:#b45309;color:#fff;border-radius:6px;font-size:11px;font-weight:700;display:inline-block">⚠️ SHIP TO DIFFERS FROM BILLING</div>
+    </div>` : '';
+
+  const formFields = `
+    <div style="grid-column:1/-1"><div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">CUSTOMER</div></div>
+    <div class="fw"><label class="fl">CUSTOMER</label><input name="customerName" value="${esc(s.customerName||'')}" required oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">BUSINESS NAME</label><input name="businessName" value="${esc(s.businessName||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">EMAIL</label><input name="customerEmail" value="${esc(s.customerEmail||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">PHONE</label><input name="customerPhone" value="${esc(s.customerPhone||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw" style="grid-column:span 2"><label class="fl">STREET ADDRESS</label><input name="customerAddress" value="${esc(s.customerAddress||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">CITY</label><input name="customerCity" value="${esc(s.customerCity||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw" style="max-width:120px"><label class="fl">STATE</label><input name="customerState" value="${esc(s.customerState||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw" style="max-width:120px"><label class="fl">ZIP</label><input name="customerZip" value="${esc(s.customerZip||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">TYPE</label><select name="customerType" onchange="fulfillmentFieldChanged()"><option value="">—</option>${['Residential','Business'].map(o=>`<option${(s.customerType||'')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="fw"><label class="fl">LIFTGATE</label><input name="liftgate" list="dl-liftgate" value="${esc(s.liftgate||'')}" placeholder="Type or choose…" oninput="fulfillmentFieldChanged()"><datalist id="dl-liftgate"><option value="Yes"><option value="No"><option value="Yes - Residential"><option value="Yes - Business"><option value="No - Has Dock"></datalist></div>
+
+    ${shipToBlock}
+
+    <div style="grid-column:1/-1;margin-top:4px"><div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">ORDER</div></div>
+    <div class="fw"><label class="fl">MACHINE</label><input name="machineName" value="${esc(s.machineName||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw" id="ful-serial-wrap">
+      <label class="fl">SERIAL #</label>
+      ${serialMatches.length ? `<select id="ful-serial-sel" onchange="document.getElementById('ful-serial-hidden').value=this.value;document.getElementById('ful-serial-txt').value=this.value;fulfillmentFieldChanged();" style="margin-bottom:4px">${serialOpts}</select>` : ''}
+      <input type="text" id="ful-serial-txt" value="${esc(curSerial)}" placeholder="${serialMatches.length?'Or type custom…':'Enter serial…'}" style="font-size:12px" oninput="document.getElementById('ful-serial-hidden').value=this.value;fulfillmentFieldChanged()">
+      <input type="hidden" name="serialNumber" id="ful-serial-hidden" value="${esc(curSerial)}">
+    </div>
+    <div class="fw"><label class="fl">INV #</label><input name="invNumber" value="${esc(s.invNumber||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">METHOD</label><select name="method" onchange="fulfillmentFieldChanged()">${['shipping','drop_ship','local_delivery','pickup'].map(o=>`<option value="${o}"${(s.method||'shipping')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+
+    <div style="grid-column:1/-1;margin-top:4px"><div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">SHIPPING</div></div>
+    <div class="fw"><label class="fl">STATUS</label><select name="status" onchange="fulfillmentFieldChanged()">${['pending','in_transit','delivered','cancelled'].map(o=>`<option value="${o}"${(s.status||'pending')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="fw"><label class="fl">CARRIER</label><input name="carrier" list="dl-carrier" value="${esc(s.carrier||'')}" placeholder="Type or choose…" oninput="fulfillmentFieldChanged()"><datalist id="dl-carrier">${carrierOpts.map(o=>`<option value="${esc(o)}">`).join('')}</datalist></div>
+    <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNumber" value="${esc(s.trackingNumber||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">TRACKING LINK</label><input name="trackingLink" value="${esc(s.trackingLink||'')}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw"><label class="fl">DATE SHIPPED</label><input type="date" name="scheduledDate" value="${s.scheduledDate||''}" oninput="fulfillmentFieldChanged()"></div>
+    <div class="fw" style="grid-column:1/-1"><label class="fl">NOTES</label><textarea name="notes" rows="2" style="width:100%" oninput="fulfillmentFieldChanged()">${esc(s.notes||'')}</textarea></div>
+  `;
 
   const allFulfil = DB.fulfillment || [];
   const filteredFulfil = fulTab === 'all' ? allFulfil : allFulfil.filter(r => {
