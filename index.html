@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.81'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.82'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1740,7 +1740,7 @@ function renderSales() {
         <div class="fw"><label class="fl">LIFTGATE</label><input name="liftgate" list="dl-liftgate" value="${rec.liftgate||''}" placeholder="Yes, No…"><datalist id="dl-liftgate"><option value="Yes"><option value="No"><option value="Yes - Residential"><option value="Yes - Business"><option value="No - Has Dock"></datalist></div>
         <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNumber" value="${rec.trackingNumber||''}" oninput="saleFieldChanged()"></div>
         <div class="fw"><label class="fl">TRACKING LINK</label><input name="trackingLink" value="${rec.trackingLink||''}" placeholder="https://…"></div>
-        <div class="fw"><label class="fl">SHIP STATUS</label><select name="shippingStatus">${['pending','label_created','in_transit','delivered'].map(o=>`<option${(rec.shippingStatus||'pending')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+        <div class="fw"><label class="fl">SHIP STATUS</label><select name="shippingStatus">${['pending','label_created','in_transit','delivered','customer_pickup'].map(o=>`<option${(rec.shippingStatus||'pending')===o?' selected':''}>${o}</option>`).join('')}</select></div>
       </div>
       <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${rec.notes||''}</textarea></div>
       <div class="fw" style="margin-bottom:4px">
@@ -3749,7 +3749,7 @@ const FULFIL_FIELDS = [
   {k:'liftgate',l:'LIFTGATE',type:'datalist',opts:['Yes','No','Yes - Residential','Yes - Business','No - Has Dock']},
   {k:'machineName',l:'MACHINE'},{k:'serialNumber',l:'SERIAL #',type:'serial_picker'},{k:'invNumber',l:'INV #'},
   {k:'method',l:'METHOD',type:'select',opts:['shipping','drop_ship','local_delivery','pickup'],def:'shipping'},
-  {k:'status',l:'STATUS',type:'select',opts:['pending','in_transit','delivered','cancelled'],def:'pending'},
+  {k:'status',l:'STATUS',type:'select',opts:['pending','in_transit','delivered','customer_pickup','cancelled'],def:'pending'},
   {k:'carrier',l:'CARRIER',type:'datalist',opts:['XPO Logistics','Forward Air','R+L Carriers','TForce Freight','Estes Express','Dayton Freight','Pitt Ohio','ABF Freight','Roadrunner Freight','Oak Harbor Freight','Daylight Transport','Total Transportation','Sutton Transport','Tax Airfreight','Magnum Logistics','Mountain Valley Express','Dedicated Delivery Professionals','FedEx','USPS','Other']},
   {k:'trackingNumber',l:'TRACKING #'},{k:'trackingLink',l:'TRACKING LINK'},
   {k:'scheduledDate',l:'DATE SHIPPED',type:'date'},
@@ -3777,7 +3777,7 @@ const FULFIL_COLS = [
   {k:'carrier',       l:'CARRIER',    w:'88px',  nowrap:true},
   {k:'trackingNumber',l:'TRACKING',   w:'110px', nowrap:true},
   {k:'scheduledDate', l:'SHIPPED',    w:'84px',  nowrap:true},
-  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_transit:'bg-blue',delivered:'bg-green',cancelled:'bg-red'}},
+  {k:'status',        l:'STATUS',     w:'82px',  badge:{pending:'bg-yellow',in_transit:'bg-blue',delivered:'bg-green',customer_pickup:'bg-purple',cancelled:'bg-red'}},
 ];
 
 function buildEmailPreview(rec) {
@@ -3929,7 +3929,7 @@ function renderFulfillment() {
     <div class="fw"><label class="fl">METHOD</label><select name="method" onchange="fulfillmentFieldChanged()">${['shipping','drop_ship','local_delivery','pickup'].map(o=>`<option value="${o}"${(s.method||'shipping')===o?' selected':''}>${o}</option>`).join('')}</select></div>
 
     <div style="grid-column:1/-1;margin-top:4px"><div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">SHIPPING</div></div>
-    <div class="fw"><label class="fl">STATUS</label><select name="status" onchange="fulfillmentFieldChanged()">${['pending','in_transit','delivered','cancelled'].map(o=>`<option value="${o}"${(s.status||'pending')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="fw"><label class="fl">STATUS</label><select name="status" onchange="fulfillmentFieldChanged()">${['pending','in_transit','delivered','customer_pickup','cancelled'].map(o=>`<option value="${o}"${(s.status||'pending')===o?' selected':''}>${o}</option>`).join('')}</select></div>
     <div class="fw"><label class="fl">CARRIER</label><input name="carrier" list="dl-carrier" value="${esc(s.carrier||'')}" placeholder="Type or choose…" oninput="fulfillmentFieldChanged()"><datalist id="dl-carrier">${carrierOpts.map(o=>`<option value="${esc(o)}">`).join('')}</datalist></div>
     <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNumber" value="${esc(s.trackingNumber||'')}" oninput="fulfillmentFieldChanged()"></div>
     <div class="fw"><label class="fl">TRACKING LINK</label><input name="trackingLink" value="${esc(s.trackingLink||'')}" oninput="fulfillmentFieldChanged()"></div>
@@ -3966,7 +3966,8 @@ function renderFulfillment() {
 
   const fulTabs = [
     {id:'pending',    label:'⏳ Pending',    color:'var(--yellow)', count:allFulfil.filter(r=>r.status==='pending').length},
-    {id:'in_transit', label:'🚚 In Transit',  color:'var(--accent)', count:allFulfil.filter(r=>r.status==='in_transit').length},
+    {id:'in_transit',     label:'🚚 In Transit',    color:'var(--accent)', count:allFulfil.filter(r=>r.status==='in_transit').length},
+    {id:'customer_pickup', label:'🏠 Cust Pickup',   color:'var(--purple)', count:allFulfil.filter(r=>r.status==='customer_pickup').length},
     {id:'delivered',  label:'✅ Delivered',   color:'var(--green)',  count:allFulfil.filter(r=>r.status==='delivered').length},
     {id:'all',        label:'📋 All',         color:'var(--muted)',  count:allFulfil.length},
   ];
