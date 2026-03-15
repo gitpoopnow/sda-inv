@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.82'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.83'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1670,7 +1670,7 @@ function renderSales() {
       <div class="grid">
         <div class="fw" style="position:relative">
           <label class="fl">CUSTOMER NAME</label>
-          <input name="customerName" value="${rec.customerName||''}" list="dl-cust-names" placeholder="Type name…" oninput="autofillCustomer(this.value,this)">
+          <input name="customerName" value="${rec.customerName||''}" list="dl-cust-names" placeholder="Type name…" oninput="autofillCustomer(this.value,this)" autocomplete="off">
           <datalist id="dl-cust-names">${getSaleCustomers().map(c=>`<option value="${c.customerName.trim()}">`).join('')}</datalist>
         </div>
         <div class="fw"><label class="fl">BUSINESS NAME</label>
@@ -5657,7 +5657,7 @@ function renderServiceCalls() {
       <div class="grid">
         <div class="fw" style="grid-column:1/-1">
           <label class="fl">CUSTOMER NAME</label>
-          <input id="svc-customerName" name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-svc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" required>
+          <input id="svc-customerName" name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-svc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="off" required>
           <datalist id="dl-cust-names-svc">${custOpts}</datalist>
         </div>
         <div class="fw"><label class="fl">BUSINESS NAME</label><input id="svc-businessName" name="businessName" value="${esc(rec.businessName)}" placeholder="Company (if applicable)"></div>
@@ -5834,7 +5834,7 @@ function renderWarrantyClaims() {
       <div class="grid">
         <div class="fw" style="grid-column:1/-1">
           <label class="fl">CUSTOMER NAME</label>
-          <input name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-wc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)">
+          <input name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-wc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="off">
           <datalist id="dl-cust-names-wc">${custOpts}</datalist>
         </div>
         <div class="fw"><label class="fl">EMAIL</label><input name="customerEmail" value="${esc(rec.customerEmail)}" placeholder="customer@email.com" type="email"></div>
