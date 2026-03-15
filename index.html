@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.79'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.80'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1177,7 +1177,7 @@ function renderInventory() {
   <div class="panel"><div class="tbl-wrap"><table>
     <thead><tr><th>MACHINE</th><th>SERIAL</th><th>LOCATION</th><th>STATUS</th><th>DATE REC'D</th><th>DATE SOLD</th><th>COST</th><th>SHELF/SPOT</th><th>PAYMENT</th><th>NOTES</th><th></th></tr></thead>
     <tbody id="inv-tbody">${pg.rows.map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.machineName)}</td>
+      <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}</td>
       <td class="m" style="font-family:monospace">${esc(r.serialNumber)||'—'}</td>
       <td>${r.section?`<span class="badge bg-blue">${r.section}</span>`:'—'}</td>
       <td>${badge(r.status,statusBadge)}</td>
@@ -1305,7 +1305,7 @@ function renderInvTable() {
   const pg=paginate(rows,invPage);
   const tbody=document.getElementById('inv-tbody');
   if(tbody) tbody.innerHTML=pg.rows.map(r=>`<tr>
-    <td style="font-weight:600">${esc(r.machineName)}</td>
+    <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}</td>
     <td class="m" style="font-family:monospace">${esc(r.serialNumber)||'—'}</td>
     <td>${r.section?`<span class="badge bg-blue">${r.section}</span>`:'—'}</td>
     <td>${badge(r.status,statusBadge)}</td>
@@ -1736,7 +1736,7 @@ function renderSales() {
   <div class="panel sales-panel" style="padding:0"><div class="tbl-wrap"><table class="sales-table">
     <thead><tr><th>MACHINE</th><th class="m">SERIAL</th><th>CUSTOMER</th><th class="m col-business">BUSINESS</th><th class="m col-shopify">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th class="m col-date">DATE</th><th>PAYMENT</th><th>STATUS</th><th></th></tr></thead>
     <tbody id="sale-tbody">${(DB.sales||[]).map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.machineName)}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted);font-weight:400">+ ${esc(g.machineName)}</span>`).join('<br>')}`:''}</td>
+      <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted);font-weight:400">+ ${esc(g.machineName)}</span>`).join('<br>')}`:''}</td>
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}</td>
       <td>${esc(r.customerName)||'—'}${r.hasShipTo==='yes'?`<br><span style="font-size:10px;color:var(--accent);font-weight:700">📦 ${esc(r.shipToName||r.shipToAddress||'diff addr')}</span>`:''}</td>
       <td class="m col-business">${esc(r.businessName)||'—'}</td>
@@ -1751,9 +1751,9 @@ function renderSales() {
       </div></td>
       <td>${badge(r.status,statusBadge)}</td>
       <td><div class="ta">
-        ${!r.inventoryId?`<button class="btn sm" style="background:var(--yellow,#f59e0b);color:#000;font-weight:700" data-sale-id="${r.id}" onclick="openAssignSerial(this.dataset.saleId)">📦 Assign Serial</button>`:''}
-        <button class="btn sm success" data-sale-id="${r.id}" onclick="moveToSoldById(this.dataset.saleId)">→ Sold</button>
-        <button class="btn sm ghost" data-sale-id="${r.id}" onclick="editSaleById(this.dataset.saleId)">Edit</button>
+        ${!r.inventoryId?`<button class="btn sm" style="background:var(--yellow,#f59e0b);color:#000;font-weight:700" data-sale-id="${r.id}" onclick="openAssignSerial(this.dataset.saleId)">Assign Ser</button>`:''}
+        <button class="btn sm success" data-sale-id="${r.id}" onclick="moveToSoldById(this.dataset.saleId)">Sold</button>
+        <button class="btn sm ghost" data-sale-id="${r.id}" onclick="editSaleById(this.dataset.saleId)">✏️</button>
         <button class="btn sm danger" onclick="deleteSale('${r.id}')">✕</button>
       </div></td>
     </tr>`).join('')||`<tr><td colspan="11" class="empty">No active sales.</td></tr>`}
