@@ -166,9 +166,9 @@ nav button{width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px;b
 nav button.active{background:rgba(59,130,246,.15);color:var(--accent);font-weight:700}
 nav button:hover:not(.active){background:var(--panel2);color:var(--text)}
 .sf{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
-.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:clip}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 header{background:var(--panel);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:200}
-main{flex:1;padding:20px;overflow-y:auto;overflow-x:clip}
+main{flex:1;padding:20px;overflow-y:auto;overflow-x:hidden}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:10px}
 .grid3{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px}
@@ -231,10 +231,14 @@ h3.st{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:10px;lette
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
 .filters select{width:auto;min-width:120px;padding:6px 10px;font-size:12px}
 .filters input{width:auto;flex:1;min-width:160px;padding:6px 10px;font-size:12px}
-.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tbl-wrap table{border-collapse:collapse;white-space:nowrap}
-/* SALES TABLE — no sticky last col, let it scroll freely */
-.sales-panel{overflow:visible !important;border-radius:12px}
+.tbl-wrap{width:100%;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch}
+.tbl-wrap table{border-collapse:collapse;white-space:nowrap;width:max-content;min-width:100%}
+/* SALES TABLE */
+.sales-panel{padding:0 !important;overflow:visible !important;border-radius:12px}
+.sales-table{width:max-content !important;min-width:1300px}
+.sales-table th,.sales-table td{white-space:nowrap;max-width:none;word-break:normal}
+.sales-table th:last-child,.sales-table td:last-child{position:static !important;right:auto !important;min-width:240px;background:transparent !important;box-shadow:none !important}
+.sales-table .ta{min-width:230px;flex-wrap:nowrap}
 .sec-badge{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700;margin-left:4px}
 
 /* ── DEMO MODE ──────────────────────────────────────────────── */
@@ -368,7 +372,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.75'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.76'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
