@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.84'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.87'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1177,7 +1177,7 @@ function renderInventory() {
   <div class="panel"><div class="tbl-wrap"><table>
     <thead><tr><th>MACHINE</th><th>SERIAL</th><th>LOCATION</th><th>STATUS</th><th>DATE REC'D</th><th>DATE SOLD</th><th>COST</th><th>SHELF/SPOT</th><th>PAYMENT</th><th>NOTES</th><th></th></tr></thead>
     <tbody id="inv-tbody">${pg.rows.map(r=>`<tr>
-      <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}</td>
+      <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}${r.isTradeIn?`<br><span style="font-size:10px;background:rgba(249,115,22,.15);color:var(--orange);border:1px solid var(--orange);border-radius:3px;padding:1px 5px;font-weight:700">🔄 Trade-In</span>`:''}</td>
       <td class="m" style="font-family:monospace">${esc(r.serialNumber)||'—'}</td>
       <td>${r.section?`<span class="badge bg-blue">${r.section}</span>`:'—'}</td>
       <td>${badge(r.status,statusBadge)}</td>
@@ -1305,7 +1305,7 @@ function renderInvTable() {
   const pg=paginate(rows,invPage);
   const tbody=document.getElementById('inv-tbody');
   if(tbody) tbody.innerHTML=pg.rows.map(r=>`<tr>
-    <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}</td>
+    <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}${r.isTradeIn?`<br><span style="font-size:10px;background:rgba(249,115,22,.15);color:var(--orange);border:1px solid var(--orange);border-radius:3px;padding:1px 5px;font-weight:700">🔄 Trade-In</span>`:''}</td>
     <td class="m" style="font-family:monospace">${esc(r.serialNumber)||'—'}</td>
     <td>${r.section?`<span class="badge bg-blue">${r.section}</span>`:'—'}</td>
     <td>${badge(r.status,statusBadge)}</td>
@@ -1789,6 +1789,23 @@ function renderSales() {
           <span id="invoice-extract-status" style="font-size:12px;color:var(--muted)">Upload a PDF to auto-fill the form</span>
         </div>
       </div>
+      <!-- Trade-Ins -->
+      <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin:14px 0 8px;letter-spacing:.08em">🔄 Trade-Ins <span style="font-weight:400;color:var(--muted);font-size:10px">(added to inventory on save)</span></div>
+      <div id="trade-in-wrap">
+        ${(rec.tradeIns||[]).map((t,i)=>`
+        <div class="trade-in-row" data-idx="${i}" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)">
+          <div><label class="fl">TYPE</label><select class="ti-type" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px"><option value="trade_in"${(t.type||'trade_in')==='trade_in'?' selected':''}>🔄 Trade-In</option><option value="return"${t.type==='return'?' selected':''}>↩️ Return</option></select></div>
+          <div><label class="fl">GAME NAME</label><input class="ti-name" value="${t.machineName||''}" placeholder="e.g. Walking Dead Pro" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">SERIAL #</label><input class="ti-serial" value="${t.serialNumber||''}" placeholder="Optional" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">CONDITION</label><select class="ti-condition" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px"><option value="Used"${t.condition==='Used'?' selected':''}>Used</option><option value="New"${t.condition==='New'?' selected':''}>New</option><option value="Parts"${t.condition==='Parts'?' selected':''}>Parts</option></select></div>
+          <div><label class="fl">VALUE ($)</label><input class="ti-value" type="number" step="0.01" value="${t.tradeValue||''}" placeholder="0.00" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <button type="button" onclick="this.closest('.trade-in-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>
+        </div>`).join('')}
+      </div>
+      <button type="button" onclick="addTradeInRow()" style="margin-bottom:12px;padding:7px 16px;background:var(--panel2);border:1.5px dashed var(--orange);color:var(--orange);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
+        <span style="font-size:16px;line-height:1">＋</span> Add Trade-In
+      </button>
+
       <div class="br">
         <button class="btn" type="submit">${saleEditing?'Save Changes':'Add Sale'}</button>
         ${saleEditing?`<button class="btn ghost" type="button" onclick="saleEditing=null;render()">Cancel</button>`:`<button class="btn ghost" type="button" onclick="(function(f){f.reset();f.querySelectorAll('select').forEach(s=>s.selectedIndex=0);document.getElementById('additional-games-wrap').innerHTML='';document.getElementById('sale-serial').value='';document.getElementById('sale-inv-id').value='';document.getElementById('ship-to-section').style.display='none';document.getElementById('hasShipTo-cb').checked=false;})(this.closest('form'))" style="opacity:.7">Clear</button>`}
@@ -1829,18 +1846,42 @@ function renderSales() {
 
   // ── Sold table (reuses SOLD_COLS) ──
   const soldRows = (DB.sold||[]).map(r => {
-    const cells = SOLD_COLS.map(c => {
-      let v = r[c.k];
-      if (c.badge) return `<td>${v?`<span class="badge ${c.badge[v]||'bg-blue'}">${v}</span>`:'—'}</td>`;
-      if (c.fmt)   return `<td>${c.fmt(v,r)}</td>`;
-      return `<td${c.m?' class="m"':''}>${v||'—'}</td>`;
-    }).join('');
-    return `<tr>${cells}<td><div class="ta">
-      <button class="btn sm ghost" data-sold-id="${r.id}" onclick="editSoldById(this.dataset.soldId)">Edit</button>
-      <button class="btn sm" style="background:var(--purple);color:#fff" data-sold-id="${r.id}" onclick="revertSaleToInventory(this.dataset.soldId)" title="Move back to inventory as in_stock">↩ Revert</button>
-      <button class="btn sm danger" onclick="deleteSold('${r.id}')">✕</button>
-    </div></td></tr>`;
-  }).join('') || `<tr><td colspan="${SOLD_COLS.length+1}" class="empty">No sold records yet.</td></tr>`;
+    const margin = r.margin ? `<span style="color:var(--green);font-weight:700">$${Number(r.margin).toLocaleString()}</span>` : '—';
+    const pmt = r.paymentStatus ? `<span class="badge ${({PIF:'bg-green',DEP:'bg-yellow','PEND PYMN':'bg-red',ACH:'bg-orange',CASH:'bg-blue',TRADE:'bg-purple'}[r.paymentStatus]||'bg-blue')}">${r.paymentStatus}</span>` : '—';
+    const detailId = `sold-detail-${r.id}`;
+    // Full detail row — hidden by default
+    const detail = `<tr id="${detailId}" style="display:none"><td colspan="8" style="padding:0">
+      <div style="background:var(--panel2);border-top:1px solid var(--border);padding:14px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px 20px;font-size:12px">
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">CUSTOMER</span>${esc(r.customerName||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">BUSINESS</span>${esc(r.businessName||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">PHONE</span>${esc(r.customerPhone||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">EMAIL</span>${esc(r.customerEmail||'—')}</div>
+        <div style="grid-column:1/-1"><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">ADDRESS</span>${r.customerAddress ? esc([r.customerAddress,r.customerCity,r.customerState,r.customerZip].filter(Boolean).join(', ')) : '—'}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">LIFTGATE</span>${esc(r.liftgate||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">CONDITION</span>${esc(r.condition||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">OUR COST</span>${r.cost?'$'+Number(r.cost).toLocaleString():'—'}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">CARRIER</span>${esc(r.shippingCompany||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">TRACKING</span>${r.trackingLink?`<a href="${r.trackingLink}" target="_blank">${esc(r.trackingNumber||'Link ↗')}</a>`:esc(r.trackingNumber||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">SHOPIFY #</span>${esc(r.shopifyOrderNum||'—')}</div>
+        ${r.notes?`<div style="grid-column:1/-1"><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">NOTES</span><span style="white-space:pre-wrap">${esc(r.notes)}</span></div>`:''}
+        <div style="grid-column:1/-1;display:flex;gap:8px;margin-top:4px">
+          <button class="btn sm ghost" data-sold-id="${r.id}" onclick="editSoldById(this.dataset.soldId)">✏️ Edit</button>
+          <button class="btn sm" style="background:var(--purple);color:#fff" data-sold-id="${r.id}" onclick="revertSaleToInventory(this.dataset.soldId)">↩ Revert</button>
+          <button class="btn sm danger" onclick="deleteSold('${r.id}')">✕ Delete</button>
+        </div>
+      </div>
+    </td></tr>`;
+    return `<tr onclick="toggleSoldDetail('${r.id}')" style="cursor:pointer" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
+      <td style="font-weight:600;white-space:normal;min-width:110px">${esc(r.machineName||'—')}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(r.serialNumber||'—')}</td>
+      <td>${esc(r.customerName||'—')}${r.businessName?`<br><span style="font-size:10px;color:var(--muted)">${esc(r.businessName)}</span>`:''}</td>
+      <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
+      <td>${margin}</td>
+      <td>${r.dateSold||'—'}</td>
+      <td>${esc(r.invNumber||'—')}</td>
+      <td>${pmt}</td>
+    </tr>${detail}`;
+  }).join('') || `<tr><td colspan="9" class="empty">No sold records yet.</td></tr>`;
 
   // ── Sold edit form ──
   const soldRec = _normalizeAddrRec(editSt['sold'] || {});
@@ -1895,7 +1936,7 @@ function renderSales() {
   <h3 class="st" style="margin-bottom:8px">SOLD RECORDS (${(DB.sold||[]).length})</h3>
   <input placeholder="🔍 Search sold records…" oninput="filterTbl('sold-tbody','sold',this.value,['machineName','customerName','businessName','invNumber','customerAddress','customerCity','customerState','notes'])" style="border-radius:9px;padding:8px 14px;margin-bottom:10px">
   <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
-    <thead><tr>${SOLD_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr></thead>
+    <thead><tr><th>MACHINE</th><th>SERIAL</th><th>CUSTOMER</th><th>PRICE</th><th>MARGIN</th><th>DATE</th><th>INV#</th><th>PMT</th></tr></thead>
     <tbody id="sold-tbody">${soldRows}</tbody>
   </table></div></div>` : '';
 
@@ -2014,6 +2055,15 @@ function editSaleById(id) {
   render();
   window.scrollTo(0, 0);
 }
+function toggleSoldDetail(id) {
+  const row = document.getElementById(`sold-detail-${id}`);
+  if (!row) return;
+  const isOpen = row.style.display !== 'none';
+  // Close all other open details first
+  document.querySelectorAll('[id^="sold-detail-"]').forEach(r => r.style.display = 'none');
+  row.style.display = isOpen ? 'none' : 'table-row';
+}
+
 function editSoldById(id) {
   const r = DB.sold.find(x => x.id === id);
   if (!r) return;
@@ -2191,6 +2241,120 @@ function collectAdditionalGames() {
   return games;
 }
 
+// ── TRADE-INS ─────────────────────────────────────────────────
+function addTradeInRow() {
+  const wrap = document.getElementById('trade-in-wrap');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.className = 'trade-in-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
+  row.innerHTML = `
+    <div><label class="fl">TYPE</label><select class="ti-type" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px"><option value="trade_in">🔄 Trade-In</option><option value="return">↩️ Return</option></select></div>
+    <div><label class="fl">GAME NAME</label><input class="ti-name" placeholder="e.g. Walking Dead Pro" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">SERIAL #</label><input class="ti-serial" placeholder="Optional" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">CONDITION</label><select class="ti-condition" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px"><option value="Used">Used</option><option value="New">New</option><option value="Parts">Parts</option></select></div>
+    <div><label class="fl">VALUE ($)</label><input class="ti-value" type="number" step="0.01" placeholder="0.00" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <button type="button" onclick="this.closest('.trade-in-row').remove()" style="padding:8px 12px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;margin-bottom:1px">✕</button>`;
+  wrap.appendChild(row);
+}
+
+function collectTradeIns() {
+  return Array.from(document.querySelectorAll('.trade-in-row')).map(row => ({
+    type:         row.querySelector('.ti-type')?.value || 'trade_in',
+    machineName:  row.querySelector('.ti-name')?.value?.trim() || '',
+    serialNumber: row.querySelector('.ti-serial')?.value?.trim() || '',
+    condition:    row.querySelector('.ti-condition')?.value || 'Used',
+    tradeValue:   row.querySelector('.ti-value')?.value || '',
+  })).filter(t => t.machineName);
+}
+
+function applyTradeInsToInventory(tradeIns, saleId, customerName) {
+  if (!tradeIns || !tradeIns.length) return;
+  if (!DB.inventory) DB.inventory = [];
+  tradeIns.forEach(t => {
+    const isReturn = t.type === 'return';
+    // Check for duplicate serial in inventory or previously sold
+    const existingInv = t.serialNumber
+      ? (DB.inventory||[]).find(i => i.serialNumber && i.serialNumber === t.serialNumber)
+      : null;
+    const soldRecord = t.serialNumber
+      ? (DB.sold||[]).find(i => i.serialNumber && i.serialNumber === t.serialNumber)
+      : null;
+
+    // If it's a return and was previously sold, update the sold record status
+    if (isReturn && soldRecord) {
+      const sidx = (DB.sold||[]).findIndex(i => i.serialNumber === t.serialNumber);
+      if (sidx !== -1) {
+        DB.sold[sidx] = {...DB.sold[sidx], returnedAt: today(), returnNotes: `Returned by ${customerName||'customer'} · Sale: ${saleId}`};
+        saveDB('sold', DB.sold[sidx].id);
+      }
+    }
+
+    const typeLabel = isReturn ? 'Return' : 'Trade-In';
+
+    // Build full original sale detail note if this serial was previously sold
+    let originalSaleNote = '';
+    if (soldRecord) {
+      const parts = [
+        `ORIGINAL SALE:`,
+        soldRecord.invNumber    ? `INV #${soldRecord.invNumber}` : '',
+        soldRecord.dateSold     ? `Sold: ${soldRecord.dateSold}` : '',
+        soldRecord.salePrice    ? `Price: $${Number(soldRecord.salePrice).toLocaleString()}` : '',
+        soldRecord.customerName ? `Customer: ${soldRecord.customerName}` : '',
+        soldRecord.businessName ? `Business: ${soldRecord.businessName}` : '',
+        soldRecord.customerPhone ? `Ph: ${soldRecord.customerPhone}` : '',
+        soldRecord.customerEmail ? `Email: ${soldRecord.customerEmail}` : '',
+        soldRecord.customerAddress ? `Addr: ${[soldRecord.customerAddress, soldRecord.customerCity, soldRecord.customerState, soldRecord.customerZip].filter(Boolean).join(', ')}` : '',
+        soldRecord.paymentStatus ? `Payment: ${soldRecord.paymentStatus}` : '',
+        soldRecord.shippingCompany ? `Shipped via: ${soldRecord.shippingCompany}` : '',
+        soldRecord.trackingNumber ? `Tracking: ${soldRecord.trackingNumber}` : '',
+      ].filter(Boolean).join(' | ');
+      originalSaleNote = parts;
+    }
+
+    const notes = [
+      `${typeLabel} from ${customerName||'customer'} · Current Sale: ${saleId}`,
+      soldRecord ? '⚠️ Previously sold unit returned' : '',
+      existingInv && !soldRecord ? '⚠️ Serial already in inventory — check for duplicate' : '',
+      originalSaleNote,
+    ].filter(Boolean).join('\n');
+
+    const rec = {
+      id: uid(),
+      createdAt: today(),
+      updatedAt: today(),
+      machineName: t.machineName,
+      serialNumber: t.serialNumber || '',
+      status: 'in_stock',
+      condition: t.condition || 'Used',
+      section: isReturn ? 'RETURNS' : 'USED',
+      cost: t.tradeValue || '',
+      notes,
+      dateReceived: today(),
+      dateSold: '',
+      isTradeIn: !isReturn,
+      isReturn: isReturn,
+      tradeValue: t.tradeValue || '',
+      sourceSaleId: saleId,
+    };
+    DB.inventory.unshift(rec);
+    saveDB('inventory', rec.id);
+
+    if (soldRecord && isReturn) {
+      showToast(`↩️ Return: ${t.machineName} (SN ${t.serialNumber||'—'}) added to inventory — original sale updated`, 'error');
+    } else if (soldRecord) {
+      showToast(`⚠️ Trade-in SN ${t.serialNumber} was previously sold — added as returned unit`, 'error');
+    } else if (existingInv) {
+      showToast(`⚠️ SN ${t.serialNumber} already in inventory — check for duplicate`, 'error');
+    }
+  });
+  const trades = tradeIns.filter(t => t.type !== 'return').length;
+  const returns = tradeIns.filter(t => t.type === 'return').length;
+  const parts = [trades ? `${trades} trade-in${trades>1?'s':''}` : '', returns ? `${returns} return${returns>1?'s':''}` : ''].filter(Boolean).join(', ');
+  showToast(`✅ ${parts} added to inventory`);
+}
+
+
 
 // ── SALE PARTS LINE ITEMS ─────────────────────────────────────
 function addSalePartRow() {
@@ -2306,6 +2470,7 @@ function submitSale(e) {
   const r = Object.fromEntries(new FormData(e.target));
   r.additionalGames = collectAdditionalGames();
   r.salePartsLines = collectSalePartsLines();
+  r.tradeIns = collectTradeIns();
   if (saleEditing) {
     // Normalize checkbox: unchecked checkboxes are absent from FormData
     if (!r.hasShipTo) { r.hasShipTo = ''; r.shipToName=''; r.shipToPhone=''; r.shipToAddress=''; r.shipToCity=''; r.shipToState=''; r.shipToZip=''; }
@@ -2385,6 +2550,12 @@ function submitSale(e) {
       });
     }
     DB.sales = DB.sales.map(x => x.id === saleEditing.id ? {...x, ...r} : x);
+    // Apply any NEW trade-ins added during edit (don't re-process ones already in inventory)
+    const prevTradeIns = saleEditing.tradeIns || [];
+    const newTradeIns = (r.tradeIns||[]).filter(t =>
+      !prevTradeIns.some(p => p.machineName === t.machineName && p.serialNumber === t.serialNumber)
+    );
+    if (newTradeIns.length) applyTradeInsToInventory(newTradeIns, saleEditing.id, r.customerName);
     saleEditing = null;
     upsertCustomer(r);
     _submitting = false; saveDB(); render();
@@ -2440,6 +2611,8 @@ function submitSale(e) {
     r.inventoryId = inventoryId;
     if (!DB.sales) DB.sales = [];
     DB.sales.unshift({id: newId, createdAt: today(), inventoryId, ...r});
+    // Process trade-ins — add each to inventory
+    if (r.tradeIns && r.tradeIns.length) applyTradeInsToInventory(r.tradeIns, newId, r.customerName);
     // Auto-create fulfillment record
     if (!DB.fulfillment) DB.fulfillment = [];
     DB.fulfillment.unshift({
