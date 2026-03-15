@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.83'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.84'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1385,8 +1385,41 @@ function getSaleCustomers() {
   });
   return Array.from(seen.values());
 }
-function autofillCustomer(name, inputEl) {
+function custNameSearch(inp) {
+  const q = (inp.value || '').toLowerCase().trim();
+  const drop = document.getElementById('cust-name-drop');
+  if (!drop) return;
   const customers = getSaleCustomers();
+  const matches = q
+    ? customers.filter(c => (c.customerName||'').toLowerCase().includes(q) || (c.businessName||'').toLowerCase().includes(q))
+    : customers.slice(0, 20);
+  if (!matches.length) { drop.style.display = 'none'; return; }
+  drop.innerHTML = matches.map(c => `
+    <div onclick="selectCustName('${esc(c.customerName.trim()).replace(/'/g,"\\'")}',this)"
+      style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border)"
+      onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
+      <div style="font-weight:700;font-size:13px">${esc(c.customerName)}</div>
+      ${c.businessName ? `<div style="font-size:11px;color:var(--muted)">${esc(c.businessName)}</div>` : ''}
+    </div>`).join('');
+  drop.style.display = 'block';
+}
+
+function selectCustName(name, el) {
+  const inp = document.getElementById('cust-name-inp');
+  if (inp) { inp.value = name; autofillCustomer(name, inp); }
+  const drop = document.getElementById('cust-name-drop');
+  if (drop) drop.style.display = 'none';
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#cust-name-wrap')) {
+    const d = document.getElementById('cust-name-drop');
+    if (d) d.style.display = 'none';
+  }
+});
+
+function autofillCustomer(name, inputEl) {
   const match = customers.find(c => c.customerName.trim().toLowerCase() === name.trim().toLowerCase());
   if (!match) return;
   const fields = ['businessName','customerEmail','customerPhone','customerAddress','customerCity','customerState','customerZip','customerType','liftgate'];
@@ -1668,10 +1701,12 @@ function renderSales() {
       </button>
       <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin:14px 0 8px;letter-spacing:.08em">👤 Bill To — Customer Info</div>
       <div class="grid">
-        <div class="fw" style="position:relative">
+        <div class="fw" style="position:relative" id="cust-name-wrap">
           <label class="fl">CUSTOMER NAME</label>
-          <input name="customerName" value="${rec.customerName||''}" list="dl-cust-names" placeholder="Type name…" oninput="autofillCustomer(this.value,this)" autocomplete="off">
-          <datalist id="dl-cust-names">${getSaleCustomers().map(c=>`<option value="${c.customerName.trim()}">`).join('')}</datalist>
+          <input name="customerName" id="cust-name-inp" value="${rec.customerName||''}" placeholder="Type name…"
+            oninput="custNameSearch(this)" onfocus="custNameSearch(this)"
+            autocomplete="new-password" role="combobox">
+          <div id="cust-name-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--panel);border:1px solid var(--accent);border-radius:8px;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)"></div>
         </div>
         <div class="fw"><label class="fl">BUSINESS NAME</label>
           <input name="businessName" value="${rec.businessName||''}" placeholder="Company / Business name"
