@@ -50,7 +50,7 @@ const ALLOWED_EMAILS = [
 // ── COLLECTIONS ───────────────────────────────────────────────
 // Each top-level key in DB gets its own Firestore collection.
 // Records are stored as documents keyed by record.id
-const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','_meta'];
+const DB_COLLECTIONS = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','bdkRequests','_meta'];
 
 // Load all collections from Firestore in parallel
 window._fbLoadAll = async () => {
@@ -384,9 +384,9 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.89'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.91'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
-const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
+const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
 let DB = {};
 let syncTimer = null;
@@ -477,7 +477,7 @@ async function loadDB() {
     if (needsReseed) {
       // Seed or re-seed all collections to Firestore from SEED
       setSyncStatus('loading', '⟳ Syncing data to cloud…');
-      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
+      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','bdkRequests'];
       for (const col of cols) {
         const records = SEED[col] || [];
         if (records.length > 0) {
@@ -489,7 +489,7 @@ async function loadDB() {
       // DB already has seed data
     } else {
       // Load everything from Firestore
-      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
+      const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','bdkRequests'];
       cols.forEach(col => {
         if (remote[col] !== undefined) DB[col] = remote[col]; // remote is source of truth even if empty
       });
@@ -536,7 +536,7 @@ function _notifyOtherTabs() {
 // ── REAL-TIME LISTENERS (per collection) ──────────────────────
 function _startRealTimeWatch() {
   if (window.DEMO_MODE) return; // Demo: no real-time sync needed
-  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
+  const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','bdkRequests'];
   cols.forEach(col => {
     if (_fbWatchers[col]) return;
     _fbWatchers[col] = window._fbWatchCollection(col, (c, records) => {
@@ -597,7 +597,7 @@ function saveDB(col, id) {
     if (record) _saveQueue[col + '::' + id] = { col, record };
   } else {
     // No specific record — queue everything (used by complex operations)
-    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders'];
+    const cols = ['inventory','parts','locations','pendingSales','sales','leads','service','wantList','fulfillment','sold','customers','warrantyClaims','shopifyDismissed','partOrders','bdkRequests'];
     cols.forEach(c => {
       (DB[c] || []).forEach(r => {
         if (r && r.id) _saveQueue[c + '::' + r.id] = { col: c, record: r };
@@ -830,7 +830,7 @@ const NAVS = [
   ['leads','👥','Leads'],['service','🔧','Service'],
   ['wantlist','⭐','Want List'],['fulfillment','🚚','Fulfillment'],
   ['parts','🔩','Parts / Access.'],['locations','📍','Locations'],
-  ['partorders','📦','Part Orders'],['warranty','🛡️','Warranty Claims'],['shopify','🛍️','Shopify Orders']
+  ['bdk','🏚️','BDK'],['partorders','📦','Part Orders'],['warranty','🛡️','Warranty Claims'],['shopify','🛍️','Shopify Orders']
 ];
 function toggleMobileMenu() {
   const sidebar = document.getElementById('sidebar');
@@ -1073,6 +1073,455 @@ function badge(v, map) {
 const statusBadge = {in_stock:'bg-green',sold:'bg-red',on_location:'bg-purple',reserved:'bg-yellow',pre_order:'bg-orange',pending:'bg-yellow',closed:'bg-green',open:'bg-blue',delivered:'bg-green',cancelled:'bg-red'};
 
 // ── DASHBOARD ─────────────────────────────────────────────────
+// ── BDK REQUESTS ─────────────────────────────────────────────
+let bdkTab = 'pull'; // 'pull' or 'pickup'
+
+function renderBDK() {
+  const requests = (DB.bdkRequests||[]);
+  const pullReqs = requests.filter(r => r.type === 'pull');
+  const pickupReqs = requests.filter(r => r.type === 'pickup');
+
+  const invOpts = (DB.inventory||[])
+    .filter(i => i.status !== 'sold')
+    .sort((a,b) => (a.machineName||'').localeCompare(b.machineName||''))
+    .map(i => `<option value="${i.id}">${esc(i.machineName)}${i.serialNumber?' — SN: '+esc(i.serialNumber):''}${i.location?' ['+esc(i.location)+']':''}</option>`)
+    .join('');
+
+  return `
+  <h1 class="pt">🏚️ BDK Requests</h1>
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button onclick="bdkTab='pull';render()" style="padding:8px 20px;border-radius:20px;border:2px solid ${bdkTab==='pull'?'var(--accent)':'var(--border)'};background:${bdkTab==='pull'?'var(--accent)':'var(--panel)'};color:${bdkTab==='pull'?'#fff':'var(--text)'};font-weight:700;font-size:13px;cursor:pointer">
+      📦 Pull from BDK (${pullReqs.length})
+    </button>
+    <button onclick="bdkTab='pickup';render()" style="padding:8px 20px;border-radius:20px;border:2px solid ${bdkTab==='pickup'?'var(--orange)':'var(--border)'};background:${bdkTab==='pickup'?'var(--orange)':'var(--panel)'};color:${bdkTab==='pickup'?'#fff':'var(--text)'};font-weight:700;font-size:13px;cursor:pointer">
+      🚛 Pickup + BOL (${pickupReqs.length})
+    </button>
+  </div>
+
+  ${bdkTab === 'pull' ? `
+  <div class="panel">
+    <h3 style="font-size:13px;font-weight:800;margin-bottom:6px">📦 New Pull Request — BDK Warehouse</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pull & prep a game for shipment. Emails keiko.abe@bdkexpress.com + bdkwarehouse@bdkexpress.com</p>
+    <form id="bdk-pull-form" onsubmit="submitBDKPull(event)">
+      <div class="grid">
+        <div class="fw" style="grid-column:1/-1">
+          <label class="fl">SELECT GAME FROM INVENTORY</label>
+          <select name="inventoryId" onchange="bdkFillFromInventory(this.value)">
+            <option value="">— Select game (optional) —</option>
+            ${invOpts}
+          </select>
+        </div>
+        <div class="fw"><label class="fl">MACHINE NAME</label><input name="machineName" id="bdk-pull-machine" required placeholder="e.g. Jaws Premium"></div>
+        <div class="fw"><label class="fl">SERIAL NUMBER</label><input name="serialNumber" id="bdk-pull-serial" placeholder="Auto-fills from inventory"></div>
+        <div class="fw"><label class="fl">REQUESTED DATE</label><input type="date" name="requestedDate" value="${today()}"></div>
+        <div class="fw" style="grid-column:1/-1"><label class="fl">SPECIAL INSTRUCTIONS / NOTES</label><textarea name="notes" rows="3" placeholder="Any prep, packaging, or handling instructions…"></textarea></div>
+      </div>
+      <div class="br" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" type="submit">💾 Save Request</button>
+        <button class="btn" type="button" style="background:var(--accent)" onclick="sendBDKPullEmail()">📧 Send Email to BDK</button>
+      </div>
+    </form>
+  </div>
+  ${pullReqs.length ? `
+  <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
+    <thead><tr><th>DATE</th><th>MACHINE</th><th>SERIAL</th><th>REQ DATE</th><th>NOTES</th><th>STATUS</th><th></th></tr></thead>
+    <tbody>${pullReqs.map(r=>`<tr>
+      <td style="font-size:11px">${r.createdAt||'—'}</td>
+      <td style="font-weight:600">${esc(r.machineName||'—')}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(r.serialNumber||'—')}</td>
+      <td>${r.requestedDate||'—'}</td>
+      <td style="font-size:11px;max-width:200px">${esc(r.notes||'—')}</td>
+      <td>${r.status?`<span class="badge ${{pending:'bg-yellow',sent:'bg-blue',complete:'bg-green'}[r.status]||'bg-blue'}">${r.status}</span>`:'—'}</td>
+      <td><div class="ta">
+        <button class="btn sm ghost" onclick="sendBDKPullEmailById('${r.id}')">📧</button>
+        <button class="btn sm danger" onclick="delRow('bdkRequests','${r.id}')">✕</button>
+      </div></td>
+    </tr>`).join('')}</tbody>
+  </table></div></div>` : '<p style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No pull requests yet.</p>'}
+  ` : `
+  <!-- ── PICKUP + BOL ── -->
+  <div class="panel">
+    <h3 style="font-size:13px;font-weight:800;margin-bottom:6px">🚛 New Pickup Request + BOL</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pick up games from another vendor. Generates a BOL. Emails keiko.abe@bdkexpress.com + bdkwarehouse@bdkexpress.com + dispatch@bdkexpress.com</p>
+    <form id="bdk-pickup-form" onsubmit="submitBDKPickup(event)">
+      <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin-bottom:8px;letter-spacing:.08em">📍 Pickup Location</div>
+      <div class="grid">
+        <div class="fw"><label class="fl">COMPANY NAME</label><input name="pickupLocationName" required value="Jersey Jack Pinball" list="dl-pickup-locs"><datalist id="dl-pickup-locs"><option value="Jersey Jack Pinball"><option value="Stern Pinball"><option value="Chicago Gaming Company"><option value="Spooky Pinball"></datalist></div>
+        <div class="fw" style="grid-column:span 2"><label class="fl">PICKUP ADDRESS</label><input name="pickupAddress" value="1850 Greenleaf Avenue, Elk Grove Village, IL 60007" placeholder="Full pickup address"></div>
+        <div class="fw"><label class="fl">CONTACT NAME</label><input name="pickupContact" placeholder="Contact at pickup location"></div>
+        <div class="fw"><label class="fl">CONTACT PHONE</label><input name="pickupPhone" placeholder="Phone"></div>
+      </div>
+      <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin:14px 0 8px;letter-spacing:.08em">📦 Games to Pick Up <span style="font-weight:400;color:var(--muted);font-size:10px">(add one row per game)</span></div>
+      <div id="bdk-games-wrap">
+        <div class="bdk-game-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 60px auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)">
+          <div><label class="fl">MACHINE NAME</label><input class="bg-name" placeholder="e.g. Godzilla Premium" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">SERIAL #</label><input class="bg-serial" placeholder="Optional" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">WEIGHT (lbs)</label><input class="bg-weight" type="number" value="350" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">NMFC CLASS</label><input class="bg-class" value="150" placeholder="150" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <div><label class="fl">QTY</label><input class="bg-qty" type="number" value="1" min="1" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          <button type="button" onclick="this.closest('.bdk-game-row').remove()" style="padding:7px 10px;background:var(--red);color:#fff;border:none;border-radius:7px;font-size:14px;cursor:pointer;margin-bottom:1px">✕</button>
+        </div>
+      </div>
+      <button type="button" onclick="addBDKGameRow()" style="margin-bottom:14px;padding:7px 16px;background:var(--panel2);border:1.5px dashed var(--orange);color:var(--orange);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Add Game</button>
+
+      <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin-bottom:8px;letter-spacing:.08em">📋 BOL Details</div>
+      <div class="grid">
+        <div class="fw"><label class="fl">BOL NUMBER</label><input name="bolNumber" placeholder="e.g. BDK-2026-001"></div>
+        <div class="fw"><label class="fl">DATE</label><input type="date" name="bolDate" value="${today()}"></div>
+        <div class="fw"><label class="fl">CARRIER NAME</label><input name="carrier" placeholder="e.g. BDK Express"></div>
+        <div class="fw"><label class="fl">TRAILER NO</label><input name="trailerNo" placeholder="Optional"></div>
+        <div class="fw"><label class="fl">SCAC</label><input name="scac" placeholder="Carrier SCAC code"></div>
+        <div class="fw"><label class="fl">PRO NO</label><input name="proNo" placeholder="Optional"></div>
+        <div class="fw">
+          <label class="fl">FREIGHT TERMS</label>
+          <select name="freightTerms">
+            <option value="Prepaid">Prepaid</option>
+            <option value="Collect">Collect</option>
+            <option value="3rd Party">3rd Party</option>
+          </select>
+        </div>
+        <div class="fw" style="grid-column:1/-1"><label class="fl">SPECIAL INSTRUCTIONS</label><textarea name="specialInstructions" rows="2" placeholder="Any special handling notes…"></textarea></div>
+      </div>
+      <div class="br" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" type="submit">💾 Save Request</button>
+        <button class="btn" type="button" style="background:var(--orange)" onclick="sendBDKPickupEmail()">📧 Send Email + BOL</button>
+        <button class="btn ghost" type="button" onclick="previewBOL()">🖨️ Preview / Print BOL</button>
+      </div>
+    </form>
+  </div>
+  ${pickupReqs.length ? `
+  <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
+    <thead><tr><th>DATE</th><th>PICKUP FROM</th><th>GAMES</th><th>BOL#</th><th>CARRIER</th><th>REQ DATE</th><th>STATUS</th><th></th></tr></thead>
+    <tbody>${pickupReqs.map(r=>`<tr>
+      <td style="font-size:11px">${r.createdAt||'—'}</td>
+      <td style="font-weight:600">${esc(r.pickupLocationName||'—')}</td>
+      <td style="font-size:11px">${(r.games||[]).map(g=>esc(g.name)).join('<br>')||'—'}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(r.bolNumber||'—')}</td>
+      <td>${esc(r.carrier||'—')}</td>
+      <td>${r.bolDate||'—'}</td>
+      <td>${r.status?`<span class="badge ${{pending:'bg-yellow',sent:'bg-blue',complete:'bg-green'}[r.status]||'bg-blue'}">${r.status}</span>`:'—'}</td>
+      <td><div class="ta">
+        <button class="btn sm ghost" onclick="sendBDKPickupEmailById('${r.id}')">📧</button>
+        <button class="btn sm" style="background:var(--purple);color:#fff" onclick="printBOLById('${r.id}')">🖨️ BOL</button>
+        <button class="btn sm danger" onclick="delRow('bdkRequests','${r.id}')">✕</button>
+      </div></td>
+    </tr>`).join('')}</tbody>
+  </table></div></div>` : '<p style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No pickup requests yet.</p>'}
+  `}`;
+}
+
+function addBDKGameRow() {
+  const wrap = document.getElementById('bdk-games-wrap');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.className = 'bdk-game-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr 60px auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border)';
+  row.innerHTML = `
+    <div><label class="fl">MACHINE NAME</label><input class="bg-name" placeholder="e.g. Godzilla Premium" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">SERIAL #</label><input class="bg-serial" placeholder="Optional" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">WEIGHT (lbs)</label><input class="bg-weight" type="number" value="350" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">NMFC CLASS</label><input class="bg-class" value="150" placeholder="150" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <div><label class="fl">QTY</label><input class="bg-qty" type="number" value="1" min="1" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    <button type="button" onclick="this.closest('.bdk-game-row').remove()" style="padding:7px 10px;background:var(--red);color:#fff;border:none;border-radius:7px;font-size:14px;cursor:pointer;margin-bottom:1px">✕</button>`;
+  wrap.appendChild(row);
+}
+
+function collectBDKGames() {
+  return Array.from(document.querySelectorAll('.bdk-game-row')).map(row => ({
+    name:   row.querySelector('.bg-name')?.value?.trim() || '',
+    serial: row.querySelector('.bg-serial')?.value?.trim() || '',
+    weight: row.querySelector('.bg-weight')?.value || '350',
+    nmfcClass: row.querySelector('.bg-class')?.value || '150',
+    qty:    row.querySelector('.bg-qty')?.value || '1',
+  })).filter(g => g.name);
+}
+
+function bdkFillFromInventory(invId) {
+  const inv = (DB.inventory||[]).find(i => i.id === invId);
+  if (!inv) return;
+  const m = document.getElementById('bdk-pull-machine');
+  const s = document.getElementById('bdk-pull-serial');
+  if (m) m.value = inv.machineName || '';
+  if (s) s.value = inv.serialNumber || '';
+}
+
+function submitBDKPull(e) {
+  e.preventDefault();
+  const r = Object.fromEntries(new FormData(e.target));
+  r.type = 'pull'; r.id = uid(); r.createdAt = today(); r.status = 'pending';
+  if (!DB.bdkRequests) DB.bdkRequests = [];
+  DB.bdkRequests.unshift(r);
+  saveDB('bdkRequests', r.id);
+  showToast('✅ Pull request saved');
+  e.target.reset(); render();
+}
+
+function submitBDKPickup(e) {
+  e.preventDefault();
+  const r = Object.fromEntries(new FormData(e.target));
+  r.games = collectBDKGames();
+  r.type = 'pickup'; r.id = uid(); r.createdAt = today(); r.status = 'pending';
+  if (!DB.bdkRequests) DB.bdkRequests = [];
+  DB.bdkRequests.unshift(r);
+  saveDB('bdkRequests', r.id);
+  showToast('✅ Pickup request saved');
+  e.target.reset(); render();
+}
+
+function buildBOLHtml(r) {
+  const games = r.games || [];
+  const totalWeight = games.reduce((s,g) => s + (parseFloat(g.weight||0)*parseInt(g.qty||1)), 0);
+  const gameRows = games.map(g => `
+    <tr>
+      <td style="border:1px solid #000;padding:4px 6px;text-align:center">${g.qty||1}</td>
+      <td style="border:1px solid #000;padding:4px 6px">Skid</td>
+      <td style="border:1px solid #000;padding:4px 6px;text-align:center">${g.qty||1}</td>
+      <td style="border:1px solid #000;padding:4px 6px">Pcs</td>
+      <td style="border:1px solid #000;padding:4px 6px;text-align:right">${(parseFloat(g.weight||350)*parseInt(g.qty||1)).toLocaleString()} lbs</td>
+      <td style="border:1px solid #000;padding:4px 6px"></td>
+      <td style="border:1px solid #000;padding:4px 6px;font-weight:600">${g.name}${g.serial ? ' — SN: '+g.serial : ''}<br><span style="font-size:10px;color:#555">Pinball Machine — Handle with care — Do not stack</span></td>
+      <td style="border:1px solid #000;padding:4px 6px;text-align:center">98654</td>
+      <td style="border:1px solid #000;padding:4px 6px;text-align:center">${g.nmfcClass||150}</td>
+    </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><title>Bill of Lading — ${r.bolNumber||'BDK'}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:20px;background:#fff}
+    .bol-wrap{border:2px solid #000;padding:0;max-width:850px;margin:0 auto}
+    .header-row{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid #000}
+    .header-left{padding:10px 12px;border-right:2px solid #000}
+    .header-right{padding:10px 12px}
+    .title{font-size:18px;font-weight:900;text-align:center;border-bottom:2px solid #000;padding:8px;letter-spacing:1px}
+    .subtitle{font-size:10px;text-align:center;padding:2px;border-bottom:1px solid #000}
+    .addr-row{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #000}
+    .addr-box{padding:8px 10px;border-right:1px solid #000}
+    .addr-box:last-child{border-right:none}
+    .label{font-size:9px;font-weight:700;text-transform:uppercase;color:#555;display:block;margin-bottom:2px}
+    .field-row{display:grid;gap:0;border-bottom:1px solid #000}
+    .field-cell{padding:4px 8px;border-right:1px solid #000;font-size:11px}
+    .field-cell:last-child{border-right:none}
+    .section-header{background:#e0e0e0;font-weight:700;font-size:10px;text-transform:uppercase;padding:3px 8px;border-bottom:1px solid #000}
+    table.commodity{width:100%;border-collapse:collapse;font-size:10px}
+    table.commodity th{border:1px solid #000;padding:3px 6px;background:#e0e0e0;font-size:9px;text-transform:uppercase;text-align:center}
+    .sig-row{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #000}
+    .sig-box{padding:10px;border-right:1px solid #000;font-size:10px}
+    .sig-box:last-child{border-right:none}
+    .sig-line{border-bottom:1px solid #000;margin-top:20px;margin-bottom:3px}
+    .freight-terms{display:flex;gap:14px;padding:6px 8px;font-size:10px;border-bottom:1px solid #000}
+    .cb{display:inline-block;width:10px;height:10px;border:1px solid #000;margin-right:4px;vertical-align:middle}
+    .checked{background:#000}
+    @media print{body{margin:0} .no-print{display:none}}
+  </style></head><body>
+  <div class="no-print" style="margin-bottom:12px;display:flex;gap:10px">
+    <button onclick="window.print()" style="padding:8px 20px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button>
+    <button onclick="window.close()" style="padding:8px 16px;background:#6b7280;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">✕ Close</button>
+  </div>
+  <div class="bol-wrap">
+    <div class="title">Straight Bill of Lading</div>
+    <div class="subtitle">Original – Not Negotiable</div>
+
+    <div class="addr-row">
+      <div class="addr-box">
+        <span class="label">Ship From:</span>
+        <div style="font-weight:700;font-size:12px">${r.pickupLocationName||'—'}</div>
+        <div>${r.pickupAddress||'—'}</div>
+        ${r.pickupContact ? '<div>Attn: '+r.pickupContact+'</div>' : ''}
+        ${r.pickupPhone ? '<div>'+r.pickupPhone+'</div>' : ''}
+        <div style="margin-top:6px"><span class="label">SID#:</span> BDK</div>
+      </div>
+      <div class="addr-box">
+        <span class="label">Ship To:</span>
+        <div style="font-weight:700;font-size:12px">BDK Express Warehouse</div>
+        <div>950 N Edgewood Ave</div>
+        <div>Wood Dale, IL 60191</div>
+        <div>Office: 630-422-5056 ext 107</div>
+        <div>Direct: 224-387-1873</div>
+        <div style="margin-top:6px"><span class="label">CID#:</span> San Diego Amusements</div>
+        <div style="font-size:10px">8670 Miramar Rd #A, San Diego CA 92126</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid #000">
+      <div class="field-cell"><span class="label">Date:</span>${r.bolDate||''}</div>
+      <div class="field-cell"><span class="label">Bill of Lading No:</span><strong>${r.bolNumber||'—'}</strong></div>
+      <div class="field-cell"><span class="label">Carrier Name:</span>${r.carrier||'BDK Express'}</div>
+      <div class="field-cell" style="border-right:none"><span class="label">Trailer No:</span>${r.trailerNo||''}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid #000">
+      <div class="field-cell"><span class="label">SCAC:</span>${r.scac||''}</div>
+      <div class="field-cell"><span class="label">Pro No:</span>${r.proNo||''}</div>
+      <div class="field-cell" style="grid-column:span 2;border-right:none"><span class="label">Special Instructions:</span>${r.specialInstructions||''}</div>
+    </div>
+
+    <div class="freight-terms">
+      <strong>Freight Charge Terms:</strong>
+      <span><span class="cb ${r.freightTerms==='Prepaid'?'checked':''}"></span>Prepaid</span>
+      <span><span class="cb ${r.freightTerms==='Collect'?'checked':''}"></span>Collect</span>
+      <span><span class="cb ${r.freightTerms==='3rd Party'?'checked':''}"></span>3rd Party</span>
+    </div>
+
+    <div class="section-header">Commodity Description</div>
+    <table class="commodity">
+      <thead><tr>
+        <th>H.U. QTY</th><th>H.U. Type</th><th>Pkg QTY</th><th>Pkg Type</th>
+        <th>Weight</th><th>H.M.</th><th>Description</th><th>NMFC No.</th><th>Class</th>
+      </tr></thead>
+      <tbody>
+        ${gameRows}
+        <tr style="background:#f5f5f5;font-weight:700">
+          <td style="border:1px solid #000;padding:4px 6px;text-align:center">${games.reduce((s,g)=>s+parseInt(g.qty||1),0)}</td>
+          <td style="border:1px solid #000;padding:4px 6px">TOTAL</td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+          <td style="border:1px solid #000;padding:4px 6px;text-align:right">${totalWeight.toLocaleString()} lbs</td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+          <td style="border:1px solid #000;padding:4px 6px"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="font-size:9px;padding:6px 8px;border-top:1px solid #000;border-bottom:1px solid #000;line-height:1.4;color:#444">
+      NOTE: Liability Limitation for loss or damage in this shipment may be applicable. See 49 U.S.C. - 14706(c)(1)(A) and (B).
+      RECEIVED, subject to individually determined rates or contracts that have been agreed upon in writing between the carrier and shipper, if applicable, otherwise to the rates, classifications and rules that have been established by the carrier and are available to the shipper on request.
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-box">
+        <div style="display:flex;gap:16px;margin-bottom:8px;font-size:10px">
+          <span><span class="cb"></span>Trailer Loaded By Shipper</span>
+          <span><span class="cb"></span>By Driver</span>
+        </div>
+        <div style="display:flex;gap:16px;margin-bottom:8px;font-size:10px">
+          <span><span class="cb"></span>Freight Counted By Shipper</span>
+          <span><span class="cb"></span>By Driver</span>
+        </div>
+        <div class="sig-line"></div>
+        <div style="display:flex;justify-content:space-between">
+          <span>Shipper Signature</span><span>Date: ________________</span>
+        </div>
+      </div>
+      <div class="sig-box">
+        <div style="font-size:10px;margin-bottom:8px">Carrier acknowledges receipt of packages and required placards. Carrier certifies emergency response information was made available.</div>
+        <div class="sig-line"></div>
+        <div style="display:flex;justify-content:space-between">
+          <span>Carrier Signature</span><span>Pickup Date: ________________</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  </body></html>`;
+}
+
+function previewBOL() {
+  const form = document.getElementById('bdk-pickup-form');
+  if (!form) return;
+  const r = Object.fromEntries(new FormData(form));
+  r.games = collectBDKGames();
+  if (!r.games.length) { showToast('⚠️ Add at least one game first', 'error'); return; }
+  const html = buildBOLHtml(r);
+  const w = window.open('', '_blank', 'width=900,height=700');
+  w.document.write(html);
+  w.document.close();
+}
+
+function printBOLById(id) {
+  const r = (DB.bdkRequests||[]).find(x => x.id === id);
+  if (!r) return;
+  const html = buildBOLHtml(r);
+  const w = window.open('', '_blank', 'width=900,height=700');
+  w.document.write(html);
+  w.document.close();
+}
+
+function buildBDKPullEmailBody(r) {
+  return `Hi BDK Team,
+
+Please pull and prepare the following game for shipment:
+
+MACHINE: ${r.machineName||'—'}
+SERIAL #: ${r.serialNumber||'—'}
+REQUESTED DATE: ${r.requestedDate||'—'}
+${r.notes ? '\nSPECIAL INSTRUCTIONS:\n'+r.notes : ''}
+
+Please confirm when ready.
+
+Thank you,
+San Diego Amusements
+858-205-3788`;
+}
+
+function buildBDKPickupEmailBody(r) {
+  const gamesList = (r.games||[]).map((g,i) => `  ${i+1}. ${g.name}${g.serial?' (SN: '+g.serial+')':''} — Qty: ${g.qty||1}, ~${g.weight||350} lbs`).join('\n');
+  return `Hi BDK Team,
+
+Please arrange pickup of the following game(s):
+
+PICKUP FROM: ${r.pickupLocationName||'—'}
+ADDRESS: ${r.pickupAddress||'—'}
+${r.pickupContact ? 'CONTACT: '+r.pickupContact : ''}
+${r.pickupPhone ? 'PHONE: '+r.pickupPhone : ''}
+
+GAMES:
+${gamesList||'See attached BOL'}
+
+BOL NUMBER: ${r.bolNumber||'—'}
+DATE: ${r.bolDate||'—'}
+CARRIER: ${r.carrier||'—'}
+FREIGHT TERMS: ${r.freightTerms||'Prepaid'}
+${r.specialInstructions ? '\nSPECIAL INSTRUCTIONS:\n'+r.specialInstructions : ''}
+
+DELIVER TO: BDK Express Warehouse, 950 N Edgewood Ave, Wood Dale, IL 60191
+
+Please confirm pickup schedule. BOL is attached / available on request.
+
+Thank you,
+San Diego Amusements
+858-205-3788`;
+}
+
+function sendBDKPullEmail() {
+  const form = document.getElementById('bdk-pull-form');
+  if (!form) return;
+  const r = Object.fromEntries(new FormData(form));
+  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com';
+  const subject = `Pull Request — ${r.machineName||'Game'} SN:${r.serialNumber||'—'}`;
+  window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPullEmailBody(r))}`);
+}
+
+function sendBDKPullEmailById(id) {
+  const r = (DB.bdkRequests||[]).find(x => x.id === id);
+  if (!r) return;
+  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com';
+  const subject = `Pull Request — ${r.machineName||'Game'} SN:${r.serialNumber||'—'}`;
+  window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPullEmailBody(r))}`);
+  const idx = DB.bdkRequests.findIndex(x => x.id === id);
+  if (idx !== -1) { DB.bdkRequests[idx] = {...DB.bdkRequests[idx], status:'sent'}; saveDB('bdkRequests', id); render(); }
+}
+
+function sendBDKPickupEmail() {
+  const form = document.getElementById('bdk-pickup-form');
+  if (!form) return;
+  const r = Object.fromEntries(new FormData(form));
+  r.games = collectBDKGames();
+  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com,dispatch@bdkexpress.com';
+  const subject = `Pickup Request — ${r.pickupLocationName||'Vendor'} — BOL# ${r.bolNumber||'—'}`;
+  window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPickupEmailBody(r))}`);
+  // Also open BOL for printing
+  if (r.games.length) { setTimeout(() => previewBOL(), 500); }
+}
+
+function sendBDKPickupEmailById(id) {
+  const r = (DB.bdkRequests||[]).find(x => x.id === id);
+  if (!r) return;
+  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com,dispatch@bdkexpress.com';
+  const subject = `Pickup Request — ${r.pickupLocationName||'Vendor'} — BOL# ${r.bolNumber||'—'}`;
+  window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPickupEmailBody(r))}`);
+  const idx = DB.bdkRequests.findIndex(x => x.id === id);
+  if (idx !== -1) { DB.bdkRequests[idx] = {...DB.bdkRequests[idx], status:'sent'}; saveDB('bdkRequests', id); render(); }
+}
+
 function renderDashboard() {
   const inv = DB.inventory || [];
   const inStock = inv.filter(i=>i.status==='in_stock').length;
@@ -3868,12 +4317,13 @@ function render() {
       pendingsales: renderPendingSales,
       wantlist: ()=>renderSimple('wantList','Want List',
         [{k:'machineName',l:'MACHINE NAME',req:1},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS NAME'},{k:'customerEmail',l:'EMAIL'},{k:'customerPhone',l:'PHONE'},{k:'maxPrice',l:'MAX PRICE ($)',type:'number'},{k:'invNumber',l:'INV #'},{k:'priority',l:'PRIORITY',type:'select',opts:['low','medium','high'],def:'medium'},{k:'status',l:'STATUS',type:'select',opts:['active','fulfilled','cancelled'],def:'active'}],
-        [{k:'machineName',l:'MACHINE'},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS',m:1},{k:'invNumber',l:'INV#',m:1},{k:'maxPrice',l:'MAX $',fmt:v=>v?'$'+v:'—'},{k:'priority',l:'PRI',badge:{low:'bg-blue',medium:'bg-yellow',high:'bg-red'}},{k:'status',l:'STATUS',badge:{active:'bg-green',fulfilled:'bg-blue',cancelled:'bg-red'}}]),
+        [{k:'createdAt',l:'DATE ADDED',m:1},{k:'machineName',l:'MACHINE'},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS',m:1},{k:'invNumber',l:'INV#',m:1},{k:'maxPrice',l:'MAX $',fmt:v=>v?'$'+v:'—'},{k:'priority',l:'PRI',badge:{low:'bg-blue',medium:'bg-yellow',high:'bg-red'}},{k:'status',l:'STATUS',badge:{active:'bg-green',fulfilled:'bg-blue',cancelled:'bg-red'}}]),
       sold: ()=>{ salesView='sold'; section='sales'; return renderSales(); },
       fulfillment: ()=>renderFulfillment(),
       warranty: ()=>renderWarrantyClaims(),
       shopify: ()=>renderShopifyOrders(),
       partorders: ()=>{ const h = renderPartOrders(); setTimeout(()=>{ if(!partOrderEditing && document.getElementById('po-lines-wrap') && !document.querySelector('.po-line-row')) addPartOrderLine(); },50); return h; },
+      bdk: ()=>renderBDK(),
     }[section]||renderDashboard)();
   } catch(err) {
     console.error('[SDA render error]', err);
