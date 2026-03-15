@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.91'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.93'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -1081,11 +1081,13 @@ function renderBDK() {
   const pullReqs = requests.filter(r => r.type === 'pull');
   const pickupReqs = requests.filter(r => r.type === 'pickup');
 
-  const invOpts = (DB.inventory||[])
-    .filter(i => i.status !== 'sold')
-    .sort((a,b) => (a.machineName||'').localeCompare(b.machineName||''))
-    .map(i => `<option value="${i.id}">${esc(i.machineName)}${i.serialNumber?' — SN: '+esc(i.serialNumber):''}${i.location?' ['+esc(i.location)+']':''}</option>`)
-    .join('');
+  // Only show inventory tagged with BDK in the location field
+  const bdkInv = (DB.inventory||[])
+    .filter(i => i.status !== 'sold' && (i.location||'').toLowerCase().includes('bdk'))
+    .sort((a,b) => (a.machineName||'').localeCompare(b.machineName||''));
+  const invOpts = bdkInv.length
+    ? bdkInv.map(i => `<option value="${i.id}">${esc(i.machineName)}${i.serialNumber?' — SN: '+esc(i.serialNumber):''}${i.location?' ['+esc(i.location)+']':''}</option>`).join('')
+    : '<option value="" disabled>No games tagged with BDK location in inventory</option>';
 
   return `
   <h1 class="pt">🏚️ BDK Requests</h1>
@@ -1103,18 +1105,25 @@ function renderBDK() {
     <h3 style="font-size:13px;font-weight:800;margin-bottom:6px">📦 New Pull Request — BDK Warehouse</h3>
     <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pull & prep a game for shipment. Emails keiko.abe@bdkexpress.com + bdkwarehouse@bdkexpress.com</p>
     <form id="bdk-pull-form" onsubmit="submitBDKPull(event)">
-      <div class="grid">
-        <div class="fw" style="grid-column:1/-1">
-          <label class="fl">SELECT GAME FROM INVENTORY</label>
-          <select name="inventoryId" onchange="bdkFillFromInventory(this.value)">
-            <option value="">— Select game (optional) —</option>
-            ${invOpts}
-          </select>
+      <div id="bdk-pull-games-wrap">
+        <div class="bdk-pull-row" style="padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
+          <div class="grid">
+            <div class="fw" style="grid-column:1/-1">
+              <label class="fl">SELECT FROM BDK INVENTORY</label>
+              <select onchange="bdkFillPullRow(this.value, this)">
+                <option value="">— Select game —</option>
+                ${invOpts}
+              </select>
+            </div>
+            <div class="fw"><label class="fl">MACHINE NAME</label><input class="bp-name" required placeholder="Auto-fills or type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+            <div class="fw"><label class="fl">SERIAL #</label><input class="bp-serial" placeholder="Auto-fills" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+          </div>
         </div>
-        <div class="fw"><label class="fl">MACHINE NAME</label><input name="machineName" id="bdk-pull-machine" required placeholder="e.g. Jaws Premium"></div>
-        <div class="fw"><label class="fl">SERIAL NUMBER</label><input name="serialNumber" id="bdk-pull-serial" placeholder="Auto-fills from inventory"></div>
+      </div>
+      <button type="button" onclick="addBDKPullRow()" style="margin-bottom:14px;padding:7px 16px;background:var(--panel2);border:1.5px dashed var(--accent);color:var(--accent);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Add Another Game</button>
+      <div class="grid">
         <div class="fw"><label class="fl">REQUESTED DATE</label><input type="date" name="requestedDate" value="${today()}"></div>
-        <div class="fw" style="grid-column:1/-1"><label class="fl">SPECIAL INSTRUCTIONS / NOTES</label><textarea name="notes" rows="3" placeholder="Any prep, packaging, or handling instructions…"></textarea></div>
+        <div class="fw" style="grid-column:span 2"><label class="fl">SPECIAL INSTRUCTIONS / NOTES</label><textarea name="notes" rows="2" placeholder="Any prep, packaging, or handling instructions…" style="resize:vertical"></textarea></div>
       </div>
       <div class="br" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn" type="submit">💾 Save Request</button>
@@ -1124,13 +1133,12 @@ function renderBDK() {
   </div>
   ${pullReqs.length ? `
   <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
-    <thead><tr><th>DATE</th><th>MACHINE</th><th>SERIAL</th><th>REQ DATE</th><th>NOTES</th><th>STATUS</th><th></th></tr></thead>
+    <thead><tr><th>DATE</th><th>GAMES</th><th>REQ DATE</th><th>NOTES</th><th>STATUS</th><th></th></tr></thead>
     <tbody>${pullReqs.map(r=>`<tr>
       <td style="font-size:11px">${r.createdAt||'—'}</td>
-      <td style="font-weight:600">${esc(r.machineName||'—')}</td>
-      <td style="font-family:monospace;font-size:11px">${esc(r.serialNumber||'—')}</td>
+      <td style="font-weight:600">${(r.games||[{name:r.machineName,serial:r.serialNumber}]).map(g=>`${esc(g.name||g.machineName||'')}${g.serial||g.serialNumber?` <span style="font-size:10px;color:var(--muted)">SN:${esc(g.serial||g.serialNumber)}</span>`:''}`).join('<br>')}</td>
       <td>${r.requestedDate||'—'}</td>
-      <td style="font-size:11px;max-width:200px">${esc(r.notes||'—')}</td>
+      <td style="font-size:11px;max-width:180px">${esc(r.notes||'—')}</td>
       <td>${r.status?`<span class="badge ${{pending:'bg-yellow',sent:'bg-blue',complete:'bg-green'}[r.status]||'bg-blue'}">${r.status}</span>`:'—'}</td>
       <td><div class="ta">
         <button class="btn sm ghost" onclick="sendBDKPullEmailById('${r.id}')">📧</button>
@@ -1236,7 +1244,52 @@ function collectBDKGames() {
   })).filter(g => g.name);
 }
 
+function addBDKPullRow() {
+  const wrap = document.getElementById('bdk-pull-games-wrap');
+  if (!wrap) return;
+  // Build BDK inventory options fresh
+  const bdkInv = (DB.inventory||[]).filter(i => i.status !== 'sold' && (i.location||'').toLowerCase().includes('bdk'));
+  const opts = bdkInv.map(i => `<option value="${i.id}">${esc(i.machineName)}${i.serialNumber?' — SN: '+esc(i.serialNumber):''}</option>`).join('');
+  const row = document.createElement('div');
+  row.className = 'bdk-pull-row';
+  row.style.cssText = 'padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px;position:relative';
+  row.innerHTML = `
+    <div class="grid">
+      <div class="fw" style="grid-column:1/-1;display:flex;align-items:flex-end;gap:8px">
+        <div style="flex:1"><label class="fl">SELECT FROM BDK INVENTORY</label>
+          <select onchange="bdkFillPullRow(this.value, this)" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+            <option value="">— Select game —</option>
+            ${opts}
+          </select>
+        </div>
+        <button type="button" onclick="this.closest('.bdk-pull-row').remove()" style="padding:7px 10px;background:var(--red);color:#fff;border:none;border-radius:7px;font-size:14px;cursor:pointer;margin-bottom:1px">✕</button>
+      </div>
+      <div class="fw"><label class="fl">MACHINE NAME</label><input class="bp-name" required placeholder="Auto-fills or type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+      <div class="fw"><label class="fl">SERIAL #</label><input class="bp-serial" placeholder="Auto-fills" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px"></div>
+    </div>`;
+  wrap.appendChild(row);
+}
+
+function bdkFillPullRow(invId, selectEl) {
+  const inv = (DB.inventory||[]).find(i => i.id === invId);
+  if (!inv) return;
+  const row = selectEl.closest('.bdk-pull-row');
+  if (!row) return;
+  const nameEl = row.querySelector('.bp-name');
+  const serialEl = row.querySelector('.bp-serial');
+  if (nameEl) nameEl.value = inv.machineName || '';
+  if (serialEl) serialEl.value = inv.serialNumber || '';
+}
+
+function collectBDKPullGames() {
+  return Array.from(document.querySelectorAll('.bdk-pull-row')).map(row => ({
+    name:   row.querySelector('.bp-name')?.value?.trim() || '',
+    serial: row.querySelector('.bp-serial')?.value?.trim() || '',
+  })).filter(g => g.name);
+}
+
 function bdkFillFromInventory(invId) {
+  // Legacy single-game fill — kept for compatibility
   const inv = (DB.inventory||[]).find(i => i.id === invId);
   if (!inv) return;
   const m = document.getElementById('bdk-pull-machine');
@@ -1248,6 +1301,11 @@ function bdkFillFromInventory(invId) {
 function submitBDKPull(e) {
   e.preventDefault();
   const r = Object.fromEntries(new FormData(e.target));
+  r.games = collectBDKPullGames();
+  if (!r.games.length) { showToast('⚠️ Add at least one game', 'error'); return; }
+  // Keep machineName/serialNumber for backward compat with single-game display
+  r.machineName = r.games.map(g => g.name).join(', ');
+  r.serialNumber = r.games.map(g => g.serial).filter(Boolean).join(', ');
   r.type = 'pull'; r.id = uid(); r.createdAt = today(); r.status = 'pending';
   if (!DB.bdkRequests) DB.bdkRequests = [];
   DB.bdkRequests.unshift(r);
@@ -1436,12 +1494,15 @@ function printBOLById(id) {
 }
 
 function buildBDKPullEmailBody(r) {
+  const gamesList = (r.games||[{name:r.machineName,serial:r.serialNumber}])
+    .map((g,i) => `  ${i+1}. ${g.name||g.machineName||'—'}${g.serial||g.serialNumber?' (SN: '+(g.serial||g.serialNumber)+')':''}`)
+    .join('\n');
   return `Hi BDK Team,
 
-Please pull and prepare the following game for shipment:
+Please pull and prepare the following game(s) for shipment:
 
-MACHINE: ${r.machineName||'—'}
-SERIAL #: ${r.serialNumber||'—'}
+${gamesList}
+
 REQUESTED DATE: ${r.requestedDate||'—'}
 ${r.notes ? '\nSPECIAL INSTRUCTIONS:\n'+r.notes : ''}
 
