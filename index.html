@@ -202,8 +202,8 @@ textarea{resize:vertical;min-height:54px}
 .br{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 table{width:100%;border-collapse:collapse;font-size:12px}
 table th,table td{white-space:nowrap}
-th{text-align:left;padding:7px 9px;color:var(--muted);font-weight:600;font-size:11px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--panel)}
-td{padding:8px 9px;vertical-align:top;border-bottom:1px solid var(--border);max-width:180px;word-break:break-word}
+th{text-align:left;padding:5px 8px;color:var(--muted);font-weight:600;font-size:10px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--panel)}
+td{padding:6px 8px;vertical-align:top;border-bottom:1px solid var(--border);max-width:180px;word-break:break-word;font-size:12px}
 .fulfil-tbl td{padding:6px 6px;max-width:none;overflow:hidden;text-overflow:ellipsis}
 .fulfil-tbl td.m{color:var(--muted)}
 td.m{color:var(--muted)}
@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.87'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.88'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
