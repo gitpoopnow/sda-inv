@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.88'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.89'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -3526,8 +3526,8 @@ function renderShopifyOrderCard(order, oi) {
       return `<div style="padding:10px 12px;background:var(--panel2);border-radius:8px;margin-bottom:6px;border:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="flex:1">
-            <div style="font-weight:600;font-size:13px">${item.rawName}</div>
-            <div style="font-size:11px;color:var(--muted)">Qty: ${item.qty} · $${item.price||'?'}</div>
+            <div style="font-weight:600;font-size:13px">${item.rawName || '<span style="color:var(--red);font-size:11px">⚠️ Item name not parsed — check email format</span>'}</div>
+            <div style="font-size:11px;color:var(--muted)">Qty: ${item.qty||1}${item.price ? ' · $'+Number(item.price).toLocaleString() : ''}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <select onchange="shopifyOrders[${oi}].lineItems[${li}]._type=this.value;shopifyOrders[${oi}].lineItems[${li}]._matchId='';render()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-weight:700">
