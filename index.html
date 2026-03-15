@@ -246,6 +246,10 @@ body.demo-mode button[onclick*="forceSyncNow"] { opacity:.35; pointer-events:non
 #mob-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:299}
 #mob-overlay.open{display:block}
 
+@media(max-width:1100px){
+  /* On medium screens hide lower-priority sales columns */
+  .sales-table .col-shopify,.sales-table .col-date,.sales-table .col-business{display:none}
+}
 @media(max-width:768px){
   body{flex-direction:column;font-size:13px}
 
@@ -364,7 +368,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.73'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.74'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1714,16 +1718,16 @@ function renderSales() {
   <h3 class="st" style="margin-bottom:8px">ACTIVE SALES (${(DB.sales||[]).length})</h3>
   <input placeholder="🔍 Search active sales…" oninput="filterTbl('sale-tbody','sales',this.value,['machineName','customerName','serialNumber','businessName'])" style="border-radius:9px;padding:8px 14px;margin-bottom:10px">
   <div class="panel sales-panel" style="padding:0"><div class="tbl-wrap"><table class="sales-table">
-    <thead><tr><th>MACHINE</th><th class="m">SERIAL</th><th>CUSTOMER</th><th class="m">BUSINESS</th><th class="m">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th class="m">DATE</th><th>PAYMENT</th><th>STATUS</th><th></th></tr></thead>
+    <thead><tr><th>MACHINE</th><th class="m">SERIAL</th><th>CUSTOMER</th><th class="m col-business">BUSINESS</th><th class="m col-shopify">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th class="m col-date">DATE</th><th>PAYMENT</th><th>STATUS</th><th></th></tr></thead>
     <tbody id="sale-tbody">${(DB.sales||[]).map(r=>`<tr>
       <td style="font-weight:600">${esc(r.machineName)}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted);font-weight:400">+ ${esc(g.machineName)}</span>`).join('<br>')}`:''}</td>
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}</td>
       <td>${esc(r.customerName)||'—'}${r.hasShipTo==='yes'?`<br><span style="font-size:10px;color:var(--accent);font-weight:700">📦 ${esc(r.shipToName||r.shipToAddress||'diff addr')}</span>`:''}</td>
-      <td class="m">${esc(r.businessName)||'—'}</td>
-      <td class="m">${esc(r.shopifyOrderNum)||'—'}</td>
+      <td class="m col-business">${esc(r.businessName)||'—'}</td>
+      <td class="m col-shopify">${esc(r.shopifyOrderNum)||'—'}</td>
       <td>${esc(r.invNumber)||'—'}</td>
       <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
-      <td class="m">${r.saleDate||'—'}</td>
+      <td class="m col-date">${r.saleDate||'—'}</td>
       <td><div style="display:flex;flex-direction:column;gap:3px">
         ${r.paymentStatus?`<span class="badge bg-orange" style="font-size:10px">${esc(r.paymentStatus)}</span>`:''}
         ${r.paymentStage?`<span class="badge ${payStageMap[r.paymentStage]||'bg-blue'}" style="font-size:10px">${esc(r.paymentStage)}</span>`:''}
