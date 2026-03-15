@@ -1420,6 +1420,7 @@ document.addEventListener('click', function(e) {
 });
 
 function autofillCustomer(name, inputEl) {
+  const customers = getSaleCustomers();
   const match = customers.find(c => c.customerName.trim().toLowerCase() === name.trim().toLowerCase());
   if (!match) return;
   const fields = ['businessName','customerEmail','customerPhone','customerAddress','customerCity','customerState','customerZip','customerType','liftgate'];
@@ -1710,7 +1711,7 @@ function renderSales() {
         </div>
         <div class="fw"><label class="fl">BUSINESS NAME</label>
           <input name="businessName" value="${rec.businessName||''}" placeholder="Company / Business name"
-            list="dl-biz-names" oninput="autofillBusiness(this.value,this)" autocomplete="off">
+            list="dl-biz-names" oninput="autofillBusiness(this.value,this)" autocomplete="new-password">
           <datalist id="dl-biz-names">${getUniqueBizNames().map(r=>`<option value="${esc(r.businessName.trim())}">`).join('')}</datalist>
         </div>
         <div class="fw"><label class="fl">EMAIL</label><input type="email" name="customerEmail" value="${rec.customerEmail||''}" placeholder="customer@email.com"></div>
@@ -5692,7 +5693,7 @@ function renderServiceCalls() {
       <div class="grid">
         <div class="fw" style="grid-column:1/-1">
           <label class="fl">CUSTOMER NAME</label>
-          <input id="svc-customerName" name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-svc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="off" required>
+          <input id="svc-customerName" name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-svc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="new-password" required>
           <datalist id="dl-cust-names-svc">${custOpts}</datalist>
         </div>
         <div class="fw"><label class="fl">BUSINESS NAME</label><input id="svc-businessName" name="businessName" value="${esc(rec.businessName)}" placeholder="Company (if applicable)"></div>
@@ -5869,7 +5870,7 @@ function renderWarrantyClaims() {
       <div class="grid">
         <div class="fw" style="grid-column:1/-1">
           <label class="fl">CUSTOMER NAME</label>
-          <input name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-wc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="off">
+          <input name="customerName" value="${esc(rec.customerName)}" list="dl-cust-names-wc" placeholder="Type name to autofill…" oninput="autofillCustomer(this.value,this)" autocomplete="new-password">
           <datalist id="dl-cust-names-wc">${custOpts}</datalist>
         </div>
         <div class="fw"><label class="fl">EMAIL</label><input name="customerEmail" value="${esc(rec.customerEmail)}" placeholder="customer@email.com" type="email"></div>
