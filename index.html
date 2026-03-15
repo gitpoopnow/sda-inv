@@ -384,7 +384,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = '6SPRI8OAegqSQ8BUI5AgHAMQ7C6iNTpv'; // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.80'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.81'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders'];
 
@@ -1400,6 +1400,33 @@ function autofillCustomer(name, inputEl) {
   // If this is the warranty form, sync ship-to after autofill
   if (typeof wcSyncShipToFromCustomer === 'function') wcSyncShipToFromCustomer();
 }
+function getUniqueBizNames() {
+  const seen = new Set();
+  const results = [];
+  [...(DB.customers||[]), ...(DB.sales||[]), ...(DB.sold||[])].forEach(r => {
+    const b = (r.businessName||'').trim();
+    if (b && !seen.has(b.toLowerCase())) {
+      seen.add(b.toLowerCase());
+      results.push(r);
+    }
+  });
+  return results;
+}
+
+function autofillBusiness(name, inputEl) {
+  if (!name.trim()) return;
+  const all = [...(DB.customers||[]), ...(DB.sales||[]), ...(DB.sold||[])];
+  const match = all.find(r => (r.businessName||'').trim().toLowerCase() === name.trim().toLowerCase());
+  if (!match) return;
+  const form = (inputEl && inputEl.closest('form')) || document.getElementById('sale-form');
+  if (!form) return;
+  const fields = ['customerName','customerEmail','customerPhone','customerAddress','customerCity','customerState','customerZip','customerType','liftgate'];
+  fields.forEach(f => {
+    const el = form.querySelector('[name="'+f+'"]');
+    if (el && match[f] && !el.value) el.value = match[f];
+  });
+}
+
 // ── ADDRESS AUTOCOMPLETE (Nominatim / OpenStreetMap — free, no key) ──────────
 // Type → see results → click or Tab to fill. Paste full address → auto-fills.
 let _addrTimer = null;
@@ -1646,7 +1673,11 @@ function renderSales() {
           <input name="customerName" value="${rec.customerName||''}" list="dl-cust-names" placeholder="Type name…" oninput="autofillCustomer(this.value,this)">
           <datalist id="dl-cust-names">${getSaleCustomers().map(c=>`<option value="${c.customerName.trim()}">`).join('')}</datalist>
         </div>
-        <div class="fw"><label class="fl">BUSINESS NAME</label><input name="businessName" value="${rec.businessName||''}" placeholder="Company / Business name"></div>
+        <div class="fw"><label class="fl">BUSINESS NAME</label>
+          <input name="businessName" value="${rec.businessName||''}" placeholder="Company / Business name"
+            list="dl-biz-names" oninput="autofillBusiness(this.value,this)" autocomplete="off">
+          <datalist id="dl-biz-names">${getUniqueBizNames().map(r=>`<option value="${esc(r.businessName.trim())}">`).join('')}</datalist>
+        </div>
         <div class="fw"><label class="fl">EMAIL</label><input type="email" name="customerEmail" value="${rec.customerEmail||''}" placeholder="customer@email.com"></div>
         <div class="fw"><label class="fl">PHONE</label><input type="tel" name="customerPhone" value="${rec.customerPhone||''}" placeholder="(619) 555-0100"></div>
         <div class="fw"><label class="fl">CUSTOMER TYPE</label><select name="customerType"><option value="">—</option>${['Residential','Business'].map(o=>`<option${(rec.customerType||'')===o?' selected':''}>${o}</option>`).join('')}</select></div>
