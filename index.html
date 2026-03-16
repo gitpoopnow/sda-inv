@@ -385,7 +385,7 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v2.04'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.05'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -3045,7 +3045,15 @@ function submitSale(e) {
       }
     }
     if (!DB.fulfillment) DB.fulfillment = [];
-    const linked = DB.fulfillment.find(f => f.saleId === saleEditing.id);
+    const linked = DB.fulfillment.find(f =>
+      f.saleId === saleEditing.id ||
+      (!f.saleId && f.inventoryId && f.inventoryId === (saleEditing.inventoryId || r.inventoryId))
+    );
+    // Patch saleId onto linked record if missing
+    if (linked && !linked.saleId) {
+      const fi = DB.fulfillment.findIndex(f => f.id === linked.id);
+      if (fi !== -1) DB.fulfillment[fi] = {...linked, saleId: saleEditing.id};
+    }
     const fulfillUpdate = {
       customerName:    r.customerName,
       businessName:    r.businessName,
@@ -7040,11 +7048,33 @@ async function init() {
   }
 
   // Register auth change handler
+  // Global error handlers — catch silent failures on iOS Safari
+  window.addEventListener('error', (e) => {
+    console.error('[SDA] Global error:', e.error || e.message);
+    const el = document.getElementById('sync-status');
+    if (el) el.textContent = '⚠ App error — check console';
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('[SDA] Promise rejection:', e.reason);
+    const el = document.getElementById('sync-status');
+    if (el) el.textContent = '⚠ Load failed';
+  });
+
   window._onAuthChange = async (user) => {
-    if (user) {
-      await _startApp(user);
-    } else {
-      _showLoginScreen();
+    try {
+      if (user) {
+        await _startApp(user);
+      } else {
+        _showLoginScreen();
+      }
+    } catch(e) {
+      console.error('[SDA] _startApp failed:', e);
+      document.body.innerHTML = `
+        <div style="padding:30px;color:#ef4444;background:#0a0c10;font-family:system-ui;font-size:14px">
+          <div style="font-size:20px;margin-bottom:12px">⚠️ App failed to load</div>
+          <div style="color:#9ca3af;margin-bottom:8px">${String(e.message || e)}</div>
+          <button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px">Reload</button>
+        </div>`;
     }
   };
 
