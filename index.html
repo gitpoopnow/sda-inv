@@ -385,7 +385,7 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.99'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.00'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -632,6 +632,13 @@ async function pushToDB() {
 // ── CRUD ──────────────────────────────────────────────────────
 function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2); }
 // HTML escape helper — use for ALL user/imported data injected into template strings
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return email || '';
+  const [name, domain] = email.split('@');
+  if (!name || !domain) return '';
+  return name.slice(0,2) + '***@' + domain;
+}
+
 function esc(v) {
   return String(v ?? '')
     .replace(/&/g, '&amp;')
@@ -4297,7 +4304,7 @@ async function fetchShopifyFromGmail() {
     const orders = rawOrders.map(o => ({
       shopifyOrderNum: '#' + clean(o.orderNumber, 20),
       customerName: clean(o.customerName || o.placedBy, 200),
-      customerEmail: maskEmail(clean(o.customerEmail, 200)), // masked in browser — full email stays server-side
+      customerEmail: (function(e){if(!e||!e.includes('@'))return e||'';const p=e.split('@');return p[0].slice(0,2)+'***@'+p[1];})(clean(o.customerEmail,200)), // masked in browser
       customerPhone: clean(o.customerPhone, 50),
       customerAddress: clean(o.customerAddress || o.address, 300),
       customerCity: clean(o.customerCity || o.city, 100),
