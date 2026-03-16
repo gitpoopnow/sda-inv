@@ -385,7 +385,7 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v2.05'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.07'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -834,12 +834,13 @@ let section = 'dashboard';
 let salesView = 'active'; // 'active' | 'sold' | 'all'
 let salePrefill = null;
 const NAVS = [
-  ['dashboard','🏠','Dashboard'],['inventory','📦','Inventory'],['sales','💰','Sales'],
-  ['pendingsales','📋','Pre-Orders'],
-  ['leads','👥','Leads'],['service','🔧','Service'],
-  ['wantlist','⭐','Want List'],['fulfillment','🚚','Fulfillment'],
-  ['parts','🔩','Parts / Access.'],['locations','📍','Locations'],
-  ['bdk','🏚️','BDK'],['partorders','📦','Part Orders'],['warranty','🛡️','Warranty Claims'],['shopify','🛍️','Shopify Orders']
+  ['dashboard','🏠','Dashboard'],['inventory','📦','Inventory'],
+  ['sales','💰','Sales'],['fulfillment','🚚','Fulfillment'],
+  ['pendingsales','📋','Pre-Orders'],['leads','👥','Leads'],
+  ['parts','🔩','Parts / Access.'],['partorders','📦','Part Orders'],
+  ['service','🔧','Service'],['warranty','🛡️','Warranty Claims'],
+  ['wantlist','⭐','Want List'],['locations','📍','Locations'],
+  ['bdk','🏚️','BDK'],['shopify','🛍️','Shopify Orders']
 ];
 function toggleMobileMenu() {
   const sidebar = document.getElementById('sidebar');
@@ -2415,9 +2416,9 @@ function renderSales() {
     return `<tr onclick="toggleSoldDetail('${r.id}')" style="cursor:pointer" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background=''">
       <td style="font-weight:600;white-space:normal;min-width:110px">${esc(r.machineName||'—')}</td>
       <td style="font-family:monospace;font-size:11px">${esc(r.serialNumber||'—')}</td>
-      <td>${esc(r.customerName||'—')}${r.businessName?`<br><span style="font-size:10px;color:var(--muted)">${esc(r.businessName)}</span>`:''}</td>
+      <td>${esc(r.customerName||'—')}</td>
+      <td class="m">${esc(r.businessName||'—')}</td>
       <td>${r.salePrice?'$'+Number(r.salePrice).toLocaleString():'—'}</td>
-      <td>${margin}</td>
       <td>${r.dateSold||'—'}</td>
       <td>${esc(r.invNumber||'—')}</td>
       <td>${pmt}</td>
@@ -2465,8 +2466,7 @@ function renderSales() {
         <div class="fw"><label class="fl">TRACKING #</label><input name="trackingNumber" value="${soldRec.trackingNumber||''}"></div>
         <div class="fw"><label class="fl">CONDITION</label><select name="condition"><option value="">—</option>${['New','Used','Project'].map(o=>`<option${(soldRec.condition||'New')===o?' selected':''}>${o}</option>`).join('')}</select></div>
         <div class="fw"><label class="fl">OUR COST ($)</label><input type="number" step="0.01" name="cost" value="${soldRec.cost||''}"></div>
-        <div class="fw"><label class="fl">MARGIN ($)</label><input type="number" step="0.01" name="margin" value="${soldRec.margin||''}"></div>
-      </div>
+              </div>
       <div class="fw" style="margin-bottom:4px"><label class="fl">NOTES</label><textarea name="notes">${soldRec.notes||''}</textarea></div>
       <div class="br">
         <button class="btn" type="submit">Save Changes</button>
@@ -2477,7 +2477,7 @@ function renderSales() {
   <h3 class="st" style="margin-bottom:8px">SOLD RECORDS (${(DB.sold||[]).length})</h3>
   <input placeholder="🔍 Search sold records…" oninput="filterTbl('sold-tbody','sold',this.value,['machineName','customerName','businessName','invNumber','customerAddress','customerCity','customerState','notes'])" style="border-radius:9px;padding:8px 14px;margin-bottom:10px">
   <div class="panel" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table>
-    <thead><tr><th>MACHINE</th><th>SERIAL</th><th>CUSTOMER</th><th>PRICE</th><th>MARGIN</th><th>DATE</th><th>INV#</th><th>PMT</th></tr></thead>
+    <thead><tr><th>MACHINE</th><th>SERIAL</th><th>CUSTOMER</th><th class="m">BUSINESS</th><th>PRICE</th><th>DATE</th><th>INV#</th><th>PMT</th></tr></thead>
     <tbody id="sold-tbody">${soldRows}</tbody>
   </table></div></div>` : '';
 
