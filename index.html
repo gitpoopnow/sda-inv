@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-  <meta http-equiv="X-Frame-Options" content="DENY">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none'; base-uri 'self'; object-src 'none';">
+  <meta http-equiv="Content-Security-Policy" content="base-uri 'self'; object-src 'none';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SDA Pinball Inventory</title>
 <!-- Firebase SDK (compat mode - no module imports needed) -->
@@ -386,7 +385,7 @@ const SEED = {
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
 const SYNC_TOKEN = ['6SP','RI8O','Aegq','SQ8B','UI5A','gHAM','Q7C6','iNTpv'].join(''); // Must match TOKEN in Apps Script
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.96'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.97'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -1374,7 +1373,7 @@ function buildBOLHtml(r) {
   </style></head><body>
   <div class="no-print" style="margin-bottom:12px;display:flex;gap:10px">
     <button onclick="window.print()" style="padding:8px 20px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button>
-    <button onclick="window.close()" style="padding:8px 16px;background:#6b7280;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">✕ Close</button>
+    <button onclick="try{window.close()}catch(e){}" style="padding:8px 16px;background:#6b7280;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">✕ Close</button>
   </div>
   <div class="bol-wrap">
     <div class="title">Straight Bill of Lading</div>
