@@ -385,11 +385,12 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v2.00'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.04'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
 let DB = {};
+let salesSort = {col:'createdAt', dir:'desc'}; // newest first by default
 let syncTimer = null;
 let syncStatus = 'idle';
 let _fbWatcher = null; // real-time listener unsubscribe handle
@@ -2332,12 +2333,34 @@ function renderSales() {
   </div>` : '';
 
   // ── Active sales table ──
+  // Sort active sales
+  const sortedSales = [...(DB.sales||[])].sort((a,b) => {
+    const av = a[salesSort.col] || a.createdAt || '';
+    const bv = b[salesSort.col] || b.createdAt || '';
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return salesSort.dir === 'desc' ? -cmp : cmp;
+  });
+  const sortArrow = (col) => salesSort.col === col ? (salesSort.dir === 'desc' ? ' ▼' : ' ▲') : '';
+  const sortTh = (col, label, cls='') => `<th class="${cls}" onclick="salesSort.col='${col}';salesSort.dir=salesSort.col==='${col}'&&salesSort.dir==='desc'?'asc':'desc';render()" style="cursor:pointer;user-select:none">${label}${sortArrow(col)}</th>`;
+
   const activeSalesHtml = (salesView === 'active' || salesView === 'all') ? `
   <h3 class="st" style="margin-bottom:8px">ACTIVE SALES (${(DB.sales||[]).length})</h3>
   <input placeholder="🔍 Search active sales…" oninput="filterTbl('sale-tbody','sales',this.value,['machineName','customerName','serialNumber','businessName'])" style="border-radius:9px;padding:8px 14px;margin-bottom:10px">
   <div class="panel sales-panel" style="padding:0"><div class="tbl-wrap"><table class="sales-table">
-    <thead><tr><th>MACHINE</th><th class="m">SERIAL</th><th>CUSTOMER</th><th class="m col-business">BUSINESS</th><th class="m col-shopify">SHOPIFY #</th><th>QB INV#</th><th>PRICE</th><th class="m col-date">DATE</th><th>PAYMENT</th><th>STATUS</th><th></th></tr></thead>
-    <tbody id="sale-tbody">${(DB.sales||[]).map(r=>`<tr>
+    <thead><tr>
+      ${sortTh('machineName','MACHINE')}
+      <th class="m">SERIAL</th>
+      ${sortTh('customerName','CUSTOMER')}
+      <th class="m col-business">BUSINESS</th>
+      <th class="m col-shopify">SHOPIFY #</th>
+      ${sortTh('invNumber','QB INV#')}
+      ${sortTh('salePrice','PRICE')}
+      <th class="m col-date">${'DATE'}</th>
+      <th>PAYMENT</th>
+      ${sortTh('status','STATUS')}
+      <th></th>
+    </tr></thead>
+    <tbody id="sale-tbody">${sortedSales.map(r=>`<tr>
       <td style="font-weight:600;white-space:normal;min-width:100px">${esc(r.machineName)}${(r.additionalGames||[]).length?`<br>${(r.additionalGames).map(g=>`<span style="font-size:11px;color:var(--muted);font-weight:400">+ ${esc(g.machineName)}</span>`).join('<br>')}`:''}</td>
       <td class="m">${r.serialNumber||(!r.inventoryId?'<span style="color:var(--yellow,#f59e0b);font-weight:700;font-size:11px">⚠ TBD</span>':'—')}</td>
       <td>${esc(r.customerName)||'—'}${r.hasShipTo==='yes'?`<br><span style="font-size:10px;color:var(--accent);font-weight:700">📦 ${esc(r.shipToName||r.shipToAddress||'diff addr')}</span>`:''}</td>
@@ -3948,7 +3971,7 @@ function psToSold(r) {
   // Update inventory status to sold
   if (invRef) {
     const idx = DB.inventory.findIndex(i => i.id === invRef.id);
-    if (idx !== -1) DB.inventory[idx] = {...invRef, status: 'sold', dateSold: soldDate};
+    if (idx !== -1) DB.inventory[idx] = {...invRef, status: 'sold', dateSold: soldDate, updatedAt: new Date().toISOString()};
   }
   // Remove from pre-orders — and delete from Firestore so it doesn't come back
   const psId = r.id;
@@ -4044,8 +4067,8 @@ function renderShopifyOrderCard(order, oi) {
       return `<div style="padding:10px 12px;background:var(--panel2);border-radius:8px;margin-bottom:6px;border:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="flex:1">
-            <div style="font-weight:600;font-size:13px">${item.rawName || '<span style="color:var(--red);font-size:11px">⚠️ Item name not parsed — check email format</span>'}</div>
-            <div style="font-size:11px;color:var(--muted)">Qty: ${item.qty||1}${item.price ? ' · $'+Number(item.price).toLocaleString() : ''}</div>
+            <div style="font-weight:600;font-size:13px">${item.rawName || `<span style="color:var(--yellow);font-size:11px">⚠️ Item name not in email — select game from inventory below</span>`}</div>
+            <div style="font-size:11px;color:var(--muted)">Qty: ${item.qty||1}${item.price ? ' · $'+Number(item.price).toLocaleString() : (order.total ? ' · Total: '+order.total : '')}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <select onchange="shopifyOrders[${oi}].lineItems[${li}]._type=this.value;shopifyOrders[${oi}].lineItems[${li}]._matchId='';render()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;font-weight:700">
@@ -4063,17 +4086,23 @@ function renderShopifyOrderCard(order, oi) {
 }
 
 function renderShopifyGameMatch(item, oi, li) {
-  const q = item.rawName.toLowerCase();
-  const matches = (DB.inventory||[])
-    .filter(inv => inv.status !== 'sold')
-    .map(inv => ({inv, score: fuzzyScore(q, (inv.machineName||'').toLowerCase())}))
-    .filter(x => x.score > 0)
-    .sort((a,b) => b.score - a.score)
-    .slice(0, 6);
-  const matched = item._matchId ? (DB.inventory||[]).find(i => i.id === item._matchId) : null;
-  return `<select onchange="shopifyOrders[${oi}].lineItems[${li}]._matchId=this.value" style="padding:5px 8px;border-radius:6px;border:1px solid ${matched?'var(--green)':'var(--yellow)'};background:var(--bg);color:var(--text);font-size:12px;max-width:220px">
-    <option value="">— Pick inventory match —</option>
-    ${matches.map(({inv}) => `<option value="${inv.id}" ${item._matchId===inv.id?'selected':''}>${inv.machineName}${inv.serialNumber?' #'+inv.serialNumber:''}</option>`).join('')}
+  const q = (item.rawName||'').toLowerCase();
+  const activeInv = (DB.inventory||[]).filter(inv => inv.status !== 'sold');
+  // If we have a name, fuzzy match; if empty show all active inventory
+  const matches = q
+    ? activeInv
+        .map(inv => ({inv, score: fuzzyScore(q, (inv.machineName||'').toLowerCase())}))
+        .filter(x => x.score > 0)
+        .sort((a,b) => b.score - a.score)
+        .slice(0, 8)
+    : activeInv
+        .sort((a,b) => (a.machineName||'').localeCompare(b.machineName||''))
+        .map(inv => ({inv}));
+  const matched = item._matchId ? activeInv.find(i => i.id === item._matchId) : null;
+  const borderColor = matched ? 'var(--green)' : 'var(--yellow)';
+  return `<select onchange="shopifyOrders[${oi}].lineItems[${li}]._matchId=this.value;render()" style="padding:5px 8px;border-radius:6px;border:1px solid ${borderColor};background:var(--bg);color:var(--text);font-size:12px;max-width:240px">
+    <option value="">— Pick game from inventory —</option>
+    ${matches.map(({inv}) => `<option value="${inv.id}" ${item._matchId===inv.id?'selected':''}>${esc(inv.machineName)}${inv.serialNumber?' SN:'+esc(inv.serialNumber):''}${inv.location?' ['+esc(inv.location)+']':''}</option>`).join('')}
     <option value="__new__" ${item._matchId==='__new__'?'selected':''}>+ Not in inventory yet</option>
   </select>`;
 }
@@ -4333,16 +4362,21 @@ async function fetchShopifyFromGmail() {
     orders.forEach(order => {
       (order.lineItems||[]).forEach(item => {
         const name = (item.rawName||'').toLowerCase();
-        const gameKeywords = ['pinball','machine','stern','jersey jack','spooky','chicago gaming'];
-        const isGame = gameKeywords.some(k => name.includes(k)) || Number(item.price||0) > 500;
+        const price = Number(item.price||0);
+        const gameKeywords = ['pinball','machine','stern','jersey jack','spooky','chicago gaming','pro','premium','limited edition',' le '];
+        const isGame = gameKeywords.some(k => name.includes(k)) || price > 500;
         item._type = isGame ? 'game' : 'part';
         if (isGame) {
-          const best = (DB.inventory||[])
-            .filter(inv => inv.status !== 'sold')
-            .map(inv => ({inv, score: fuzzyScore(name, (inv.machineName||'').toLowerCase())}))
-            .filter(x => x.score > 0)
-            .sort((a,b) => b.score - a.score)[0];
-          item._matchId = best ? best.inv.id : '';
+          // If name is empty, no auto-match — user picks manually from full list
+          if (name) {
+            const best = activeInv
+              .map(inv => ({inv, score: fuzzyScore(name, (inv.machineName||'').toLowerCase())}))
+              .filter(x => x.score > 0)
+              .sort((a,b) => b.score - a.score)[0];
+            item._matchId = best ? best.inv.id : '';
+          } else {
+            item._matchId = ''; // no auto-match when name unknown
+          }
         } else {
           const best = (DB.parts||[])
             .map(p => ({p, score: fuzzyScore(name, (p.itemName||'').toLowerCase())}))
@@ -4351,6 +4385,17 @@ async function fetchShopifyFromGmail() {
           item._matchId = best ? best.p.id : '';
         }
       });
+      // If order has no line items parsed, create a fallback game item from order total
+      if (!order.lineItems || order.lineItems.length === 0) {
+        const subtotal = parseFloat(order.subtotal || order.total?.replace(/[^0-9.]/g,'') || 0);
+        order.lineItems = [{
+          rawName: '',
+          qty: 1,
+          price: subtotal,
+          _type: 'game',
+          _matchId: ''
+        }];
+      }
     });
     // Merge — avoid duplicates and already-dismissed orders
     const existingNums = new Set(shopifyOrders.map(o => o.shopifyOrderNum));
