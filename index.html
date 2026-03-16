@@ -136,16 +136,12 @@ window._fbWatchCollection = (col, cb) => {
   );
 };
 
-// Desktop uses popup (reliable), mobile uses redirect (Safari blocks popups)
-const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// Use popup for all devices — redirect fails on Safari/Chrome mobile with non-Firebase hosting
 if (_provider) {
   _provider.setCustomParameters({ prompt: 'select_account' });
 }
 window._fbSignIn = async () => {
   if (!_auth || !_provider) throw new Error('Firebase unavailable');
-  if (_isMobile) {
-    return await _auth.signInWithRedirect(_provider);
-  }
   return await _auth.signInWithPopup(_provider);
 };
 window._fbSignOut  = () => {
@@ -385,12 +381,12 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v2.07'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.10'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
 let DB = {};
-let salesSort = {col:'createdAt', dir:'desc'}; // newest first by default
+let salesSort = {col:'saleDate', dir:'desc'}; // newest sale date first
 let syncTimer = null;
 let syncStatus = 'idle';
 let _fbWatcher = null; // real-time listener unsubscribe handle
@@ -1981,12 +1977,10 @@ function autofillBusiness(name, inputEl) {
   });
 }
 
-// ── ADDRESS AUTOCOMPLETE (Nominatim / OpenStreetMap — free, no key) ──────────
-// Type → see results → click or Tab to fill. Paste full address → auto-fills.
+// ── ADDRESS AUTOCOMPLETE (US Census Geocoder — free, no key, official US data) ──
 let _addrTimer = null;
 const _addrState = {};
 
-// Self-initializing: reads data-* attributes from the input, no separate init needed
 function _addrCfg(inputId) {
   if (_addrState[inputId]) return _addrState[inputId];
   const inp = document.getElementById(inputId);
@@ -2001,61 +1995,81 @@ function _addrCfg(inputId) {
 
 function _addrSet(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
 
+// Close all dropdowns when clicking outside
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('[id$="-drop"]') && !e.target.closest('input[id$="-full"]')) {
+    document.querySelectorAll('[id$="-drop"]').forEach(d => {
+      if (d.style && d.style.display !== 'none' && d.id.includes('addr')) d.style.display = 'none';
+    });
+  }
+}, true);
+
 function addrFill(inputId, idx) {
   const cfg = _addrCfg(inputId);
   if (!cfg || !cfg.results[idx]) return;
-  const r = cfg.results[idx], a = r.address || {};
-  _addrSet(cfg.streetId, [a.house_number, a.road].filter(Boolean).join(' ') || r.display_name.split(',')[0].trim());
-  _addrSet(cfg.cityId, a.city||a.town||a.village||a.municipality||a.suburb||a.county||'');
-  _addrSet(cfg.stateId, a.state||a.region||a.state_district||'');
-  _addrSet(cfg.zipId, a.postcode||'');
+  const r = cfg.results[idx];
+  _addrSet(cfg.streetId, r.street);
+  _addrSet(cfg.cityId,   r.city);
+  _addrSet(cfg.stateId,  r.state);
+  _addrSet(cfg.zipId,    r.zip);
   _addrSet(inputId, '');
   const drop = document.getElementById(inputId+'-drop');
   if (drop) drop.style.display = 'none';
 }
 
-function addrSearch(inputId) {
+async function addrSearch(inputId) {
   const cfg = _addrCfg(inputId);
   const inp = document.getElementById(inputId);
   if (!cfg || !inp) return;
   const val = inp.value.trim();
   clearTimeout(_addrTimer);
   const drop = document.getElementById(inputId+'-drop');
-  if (val.length < 3) { if (drop) drop.style.display = 'none'; return; }
+  if (val.length < 4) { if (drop) drop.style.display = 'none'; return; }
   _addrTimer = setTimeout(async () => {
-    _addrShowDrop(inputId, '<div style="padding:10px 14px;color:var(--yellow);font-size:12px">\u27f3 Searching…</div>');
+    _addrShowDrop(inputId, '<div style="padding:10px 14px;color:var(--yellow);font-size:12px">⟳ Searching…</div>');
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=us&limit=7&q=${encodeURIComponent(val)}`;
-      const res = await fetch(url, { headers: { 'User-Agent':'SDA-Pinball/1.0', 'Accept-Language':'en-US,en' } });
+      // US Census Bureau geocoder — free, no key, accurate US addresses
+      const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(val)}&benchmark=Public_AR_Current&format=json`;
+      const res = await fetch(url);
       const data = await res.json();
-      cfg.results = data || []; cfg.sel = -1;
-      if (!data || !data.length) {
-        // Best-effort: parse whatever was typed and populate fields
+      const matches = data?.result?.addressMatches || [];
+
+      if (!matches.length) {
+        // Fallback: try USPS-style parsing
         const p = _addrParse(val);
-        _addrSet(cfg.streetId, p.street || val);
-        if (p.city)  _addrSet(cfg.cityId,  p.city);
-        if (p.state) _addrSet(cfg.stateId, p.state);
-        if (p.zip)   _addrSet(cfg.zipId,   p.zip);
-        _addrSet(inputId, '');
-        const d = document.getElementById(inputId+'-drop');
-        if (d) d.style.display = 'none';
+        if (p.street) {
+          _addrSet(cfg.streetId, p.street);
+          if (p.city)  _addrSet(cfg.cityId,  p.city);
+          if (p.state) _addrSet(cfg.stateId, p.state);
+          if (p.zip)   _addrSet(cfg.zipId,   p.zip);
+          _addrSet(inputId, '');
+          if (drop) drop.style.display = 'none';
+        } else {
+          _addrShowDrop(inputId, '<div style="padding:10px 14px;color:var(--muted);font-size:12px">No results — try full address (e.g. 123 Main St, San Diego CA 92101)</div>');
+        }
         return;
       }
-      _addrShowDrop(inputId, data.slice(0,7).map((r,i) => {
-        const a = r.address||{};
-        const st = [a.house_number,a.road].filter(Boolean).join(' ')||r.display_name.split(',')[0].trim();
-        const ci = a.city||a.town||a.village||a.municipality||a.county||'';
-        const sa = a.state||a.region||'';
-        const zp = a.postcode||'';
-        return `<div onmousedown="addrFill('${inputId}',${i})" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--panel)'" onmouseout="this.style.background=''">
-          <div style="font-weight:600;font-size:13px">${st||r.display_name.split(',')[0]}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${[ci,sa,zp].filter(Boolean).join(' \u00b7 ')}</div>
-        </div>`;
-      }).join(''));
+
+      cfg.results = matches.map(m => ({
+        street: m.addressComponents?.streetName
+          ? `${m.addressComponents.fromAddress||''} ${m.addressComponents.preQualifier||''} ${m.addressComponents.streetName||''} ${m.addressComponents.suffixType||''}`.replace(/\s+/g,' ').trim()
+          : m.matchedAddress.split(',')[0].trim(),
+        city:  m.addressComponents?.city || '',
+        state: m.addressComponents?.state || '',
+        zip:   m.addressComponents?.zip || '',
+        full:  m.matchedAddress || ''
+      }));
+      cfg.sel = -1;
+
+      _addrShowDrop(inputId, cfg.results.map((r,i) => `
+        <div onmousedown="addrFill('${inputId}',${i})" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--panel)'" onmouseout="this.style.background=''">
+          <div style="font-weight:600;font-size:13px">${r.street}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${[r.city,r.state,r.zip].filter(Boolean).join(' · ')}</div>
+        </div>`).join(''));
     } catch(e) {
-      _addrShowDrop(inputId, '<div style="padding:10px 14px;color:var(--muted);font-size:12px">Search unavailable \u2014 fill manually</div>');
+      _addrShowDrop(inputId, '<div style="padding:10px 14px;color:var(--muted);font-size:12px">Search unavailable — fill manually</div>');
     }
-  }, 600);
+  }, 500);
 }
 
 function _addrShowDrop(inputId, html) {
@@ -7028,24 +7042,7 @@ async function init() {
     }
   }
 
-  // Check for redirect result first — we use signInWithRedirect for all devices
-  // This fires after Google redirects the user back to the app
-  if (_auth && _auth.getRedirectResult) {
-    try {
-      const result = await _auth.getRedirectResult();
-      if (result && result.user) {
-        await _startApp(result.user);
-        return;
-      }
-    } catch(e) {
-      if (e.code !== 'auth/no-auth-event' && e.code !== 'auth/null-user') {
-        console.warn('[SDA] Redirect result error:', e.message);
-        // Show error on login screen if it's already visible
-        const errEl = document.getElementById('login-err');
-        if (errEl) errEl.textContent = e.message;
-      }
-    }
-  }
+  // Popup-only auth — no redirect result to check
 
   // Register auth change handler
   // Global error handlers — catch silent failures on iOS Safari
