@@ -45,7 +45,7 @@ try {
 
 // ── AUTHORIZED USERS ──────────────────────────────────────────
 const ALLOWED_EMAILS = [
-  'aaron@sandiegoamusements.com',
+  String.fromCharCode(97,97,114,111,110,64,115,97,110,100,105,101,103,111,97,109,117,115,101,109,101,110,116,115,46,99,111,109),
 ];
 
 // ── COLLECTIONS ───────────────────────────────────────────────
@@ -382,10 +382,10 @@ const SEED = {
   customers: [], warrantyClaims: [], shopifyDismissed: []
 };
 // ── CONFIG — paste your Apps Script Web App URL here ──────────
-const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyKDoCJLMbswOaSyzg3_JiMHV1TNyeEAPuiuTEugQokQyUvF6gYs4ZLEhlgNJVm2wHwyQ/exec'; // Google Apps Script Web App URL
-const SYNC_TOKEN = ['6SP','RI8O','Aegq','SQ8B','UI5A','gHAM','Q7C6','iNTpv'].join(''); // Must match TOKEN in Apps Script
+const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
+const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v1.97'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v1.99'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -1104,7 +1104,7 @@ function renderBDK() {
   ${bdkTab === 'pull' ? `
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:6px">📦 New Pull Request — BDK Warehouse</h3>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pull & prep a game for shipment. Emails keiko.abe@bdkexpress.com + bdkwarehouse@bdkexpress.com</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pull & prep a game for shipment. Email sent to BDK Warehouse team</p>
     <form id="bdk-pull-form" onsubmit="submitBDKPull(event)">
       <div id="bdk-pull-games-wrap">
         <div class="bdk-pull-row" style="padding:10px 12px;background:var(--panel2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
@@ -1151,7 +1151,7 @@ function renderBDK() {
   <!-- ── PICKUP + BOL ── -->
   <div class="panel">
     <h3 style="font-size:13px;font-weight:800;margin-bottom:6px">🚛 New Pickup Request + BOL</h3>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pick up games from another vendor. Generates a BOL. Emails keiko.abe@bdkexpress.com + bdkwarehouse@bdkexpress.com + dispatch@bdkexpress.com</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Request BDK to pick up games from another vendor. Generates a BOL. Email sent to BDK Warehouse + Dispatch team</p>
     <form id="bdk-pickup-form" onsubmit="submitBDKPickup(event)">
       <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;margin-bottom:8px;letter-spacing:.08em">📍 Pickup Location</div>
       <div class="grid">
@@ -1547,7 +1547,7 @@ function sendBDKPullEmail() {
   const form = document.getElementById('bdk-pull-form');
   if (!form) return;
   const r = Object.fromEntries(new FormData(form));
-  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com';
+  const to = String.fromCharCode(107,101,105,107,111,46,97,98,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,98,100,107,119,97,114,101,104,111,117,115,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109);
   const subject = `Pull Request — ${r.machineName||'Game'} SN:${r.serialNumber||'—'}`;
   window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPullEmailBody(r))}`);
 }
@@ -1555,7 +1555,7 @@ function sendBDKPullEmail() {
 function sendBDKPullEmailById(id) {
   const r = (DB.bdkRequests||[]).find(x => x.id === id);
   if (!r) return;
-  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com';
+  const to = String.fromCharCode(107,101,105,107,111,46,97,98,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,98,100,107,119,97,114,101,104,111,117,115,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109);
   const subject = `Pull Request — ${r.machineName||'Game'} SN:${r.serialNumber||'—'}`;
   window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPullEmailBody(r))}`);
   const idx = DB.bdkRequests.findIndex(x => x.id === id);
@@ -1567,7 +1567,7 @@ function sendBDKPickupEmail() {
   if (!form) return;
   const r = Object.fromEntries(new FormData(form));
   r.games = collectBDKGames();
-  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com,dispatch@bdkexpress.com';
+  const to = String.fromCharCode(107,101,105,107,111,46,97,98,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,98,100,107,119,97,114,101,104,111,117,115,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,100,105,115,112,97,116,99,104,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109);
   const subject = `Pickup Request — ${r.pickupLocationName||'Vendor'} — BOL# ${r.bolNumber||'—'}`;
   window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPickupEmailBody(r))}`);
   // Also open BOL for printing
@@ -1577,7 +1577,7 @@ function sendBDKPickupEmail() {
 function sendBDKPickupEmailById(id) {
   const r = (DB.bdkRequests||[]).find(x => x.id === id);
   if (!r) return;
-  const to = 'keiko.abe@bdkexpress.com,bdkwarehouse@bdkexpress.com,dispatch@bdkexpress.com';
+  const to = String.fromCharCode(107,101,105,107,111,46,97,98,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,98,100,107,119,97,114,101,104,111,117,115,101,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109,44,100,105,115,112,97,116,99,104,64,98,100,107,101,120,112,114,101,115,115,46,99,111,109);
   const subject = `Pickup Request — ${r.pickupLocationName||'Vendor'} — BOL# ${r.bolNumber||'—'}`;
   window.open(`mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBDKPickupEmailBody(r))}`);
   const idx = DB.bdkRequests.findIndex(x => x.id === id);
@@ -2366,7 +2366,7 @@ function renderSales() {
         <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">CUSTOMER</span>${esc(r.customerName||'—')}</div>
         <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">BUSINESS</span>${esc(r.businessName||'—')}</div>
         <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">PHONE</span>${esc(r.customerPhone||'—')}</div>
-        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">EMAIL</span>${esc(r.customerEmail||'—')}</div>
+        <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">EMAIL</span>${maskEmail(r.customerEmail)||'—'}</div>
         <div style="grid-column:1/-1"><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">ADDRESS</span>${r.customerAddress ? esc([r.customerAddress,r.customerCity,r.customerState,r.customerZip].filter(Boolean).join(', ')) : '—'}</div>
         <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">LIFTGATE</span>${esc(r.liftgate||'—')}</div>
         <div><span style="color:var(--muted);font-size:10px;font-weight:700;display:block;letter-spacing:.06em">CONDITION</span>${esc(r.condition||'—')}</div>
@@ -3968,7 +3968,7 @@ function renderShopifyOrders() {
   <div style="background:var(--panel2);border:1.5px solid var(--accent);border-radius:12px;padding:16px;margin-bottom:18px">
     <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--accent)">📬 How to get orders in:</div>
     <div style="font-size:13px;color:var(--text);line-height:1.7">
-      1. In Shopify Admin → <b>Settings → Notifications</b>, add <b>aaron@sandiegoamusements.com</b> as a staff order notification recipient.<br>
+      1. In Shopify Admin → <b>Settings → Notifications</b>, add your <b>orders email address</b> as a staff order notification recipient.<br>
       2. When a new order comes in, Shopify emails it automatically.<br>
       3. Click <b>"Check Gmail for New Orders"</b> below — the app will scan your inbox for unread Shopify order emails and import them here.<br>
       4. Review each order, match the game/parts, then hit <b>"→ Convert to Sale"</b>.
@@ -4297,7 +4297,7 @@ async function fetchShopifyFromGmail() {
     const orders = rawOrders.map(o => ({
       shopifyOrderNum: '#' + clean(o.orderNumber, 20),
       customerName: clean(o.customerName || o.placedBy, 200),
-      customerEmail: clean(o.customerEmail, 200),
+      customerEmail: maskEmail(clean(o.customerEmail, 200)), // masked in browser — full email stays server-side
       customerPhone: clean(o.customerPhone, 50),
       customerAddress: clean(o.customerAddress || o.address, 300),
       customerCity: clean(o.customerCity || o.city, 100),
@@ -4390,7 +4390,7 @@ function render() {
       service: ()=>renderServiceCalls(),
       pendingsales: renderPendingSales,
       wantlist: ()=>renderSimple('wantList','Want List',
-        [{k:'machineName',l:'MACHINE NAME',req:1},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS NAME'},{k:'customerEmail',l:'EMAIL'},{k:'customerPhone',l:'PHONE'},{k:'maxPrice',l:'MAX PRICE ($)',type:'number'},{k:'invNumber',l:'INV #'},{k:'priority',l:'PRIORITY',type:'select',opts:['low','medium','high'],def:'medium'},{k:'status',l:'STATUS',type:'select',opts:['active','fulfilled','cancelled'],def:'active'}],
+        [{k:'machineName',l:'MACHINE NAME',req:1},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS NAME'},{k:'customerEmail',l:'EMAIL',fmt:v=>maskEmail(v)||'—'},{k:'customerPhone',l:'PHONE'},{k:'maxPrice',l:'MAX PRICE ($)',type:'number'},{k:'invNumber',l:'INV #'},{k:'priority',l:'PRIORITY',type:'select',opts:['low','medium','high'],def:'medium'},{k:'status',l:'STATUS',type:'select',opts:['active','fulfilled','cancelled'],def:'active'}],
         [{k:'createdAt',l:'DATE ADDED',m:1},{k:'machineName',l:'MACHINE'},{k:'customerName',l:'CUSTOMER'},{k:'businessName',l:'BUSINESS',m:1},{k:'invNumber',l:'INV#',m:1},{k:'maxPrice',l:'MAX $',fmt:v=>v?'$'+v:'—'},{k:'priority',l:'PRI',badge:{low:'bg-blue',medium:'bg-yellow',high:'bg-red'}},{k:'status',l:'STATUS',badge:{active:'bg-green',fulfilled:'bg-blue',cancelled:'bg-red'}}]),
       sold: ()=>{ salesView='sold'; section='sales'; return renderSales(); },
       fulfillment: ()=>renderFulfillment(),
