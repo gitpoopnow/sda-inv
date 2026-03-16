@@ -381,7 +381,7 @@ const SEED = {
 const SYNC_URL = String.fromCharCode(104,116,116,112,115,58,47,47,115,99,114,105,112,116,46,103,111,111,103,108,101,46,99,111,109,47,109,97,99,114,111,115,47,115,47,65,75,102,121,99,98,121,75,68,111,67,74,76,77,98,115,119,79,97,83,121,122,103,51,95,74,105,77,72,86,49,84,78,121,101,69,65,80,117,105,117,84,69,117,103,81,111,107,81,121,85,118,70,54,103,89,115,52,90,76,69,104,108,103,78,74,86,109,50,119,72,119,121,81,47,101,120,101,99); // endpoint
 const SYNC_TOKEN = String.fromCharCode(54,83,80,82,73,56,79,65,101,103,113,83,81,56,66,85,73,53,65,103,72,65,77,81,55,67,54,105,78,84,112,118); // token
 // SYNC_KEY removed — auth handled by Google identity (Session.getActiveUser)
-const BUILD_VERSION = 'v2.10'; // Auto-updated on each deploy
+const BUILD_VERSION = 'v2.11'; // Auto-updated on each deploy
 const LOCAL_KEY = 'sda_inv_v2_fb';
 const ALL_TABLES = ['inventory','sales','leads','service','pendingSales','wantList','fulfillment','parts','locations','sold','warrantyClaims','customers','shopifyDismissed','partOrders','bdkRequests'];
 
@@ -6836,19 +6836,26 @@ function _showLoginScreen() {
       </div>
     </div>`;
 
-  // Sign in button
+  // Sign in button — MUST call signInWithPopup synchronously (no async/await)
+  // iOS Safari blocks popups that aren't opened in direct response to a tap
   document.getElementById('login-btn').addEventListener('click', function() {
     const errEl = document.getElementById('login-err');
-    if (!window._fbSignIn) {
+    if (!_auth || !_provider) {
       if (errEl) errEl.textContent = 'Still loading, please wait a moment and try again';
       return;
     }
     this.disabled = true;
     this.textContent = 'Signing in…';
-    window._fbSignIn().catch(e => {
-      this.disabled = false;
-      this.innerHTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg> Sign in with Google';
-      if (errEl) errEl.textContent = e.message;
+    const btn = this;
+    // Call synchronously — do NOT await or wrap in async function
+    _auth.signInWithPopup(_provider).then(result => {
+      // onAuthStateChanged will handle starting the app
+    }).catch(e => {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg> Sign in with Google';
+      if (errEl) errEl.textContent = e.code === 'auth/popup-blocked'
+        ? '⚠️ Popup blocked — allow popups for this site in Safari settings'
+        : e.message;
     });
   });
 
